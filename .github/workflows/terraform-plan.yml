@@ -28,7 +28,7 @@ jobs:
       run: terraform init
 
     - name: Terraform Plan
-      run: terraform plan
+      run: terraform plan -var="ssh_public_key_path=$HOME/.ssh/id_rsa.pub"
     
     - name: Get current date
       id: date
