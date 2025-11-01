@@ -19,20 +19,33 @@ jobs:
         aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
         aws-region: us-east-1
 
-    - name: Generate SSH Key for Terraform
-      run: |
-        mkdir -p ~/.ssh
-        ssh-keygen -t rsa -b 4096 -f ~/.ssh/id_rsa -N "" -q
-
     - name: Terraform Init
-      run: terraform initt
+      run: terraform init
 
     - name: Terraform Apply
-      run: terraform apply -auto-approve -var="ssh_public_key_path=$HOME/.ssh/id_rsa.pub"
+      run: terraform apply -auto-approve
+
+    - name: Save private key
+      run: |
+        terraform output -raw private_key > vpn_private_key.pem
+        chmod 600 vpn_private_key.pem
+
+    - name: Upload private key artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: vpn-private-key
+        path: vpn_private_key.pem
+        retention-days: 1
+
+    - name: Get outputs
+      id: outputs
+      run: |
+        echo "public_ip=$(terraform output -raw vpn_server_public_ip)" >> $GITHUB_OUTPUT
+        echo "instance_id=$(terraform output -raw vpn_server_instance_id)" >> $GITHUB_OUTPUT
 
     - name: Get current date
       id: date
-      run: echo "date=$(date)" >> $GITHUB_OUTPUT
+      run: echo "date=$(date +'%Y-%m-%d %H:%M:%S %Z')" >> $GITHUB_OUTPUT
 
     - name: Send Telegram notification
       uses: appleboy/telegram-action@v1.0.0
@@ -40,6 +53,17 @@ jobs:
         to: ${{ secrets.TELEGRAM_CHAT_ID }}
         token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
         message: |
-          🚀 Terraform apply completed!
-          🖥️ Server: ${{ secrets.VPN_SERVER_IP }}
+          🚀 Terraform Apply Completed!
+          
+          ✅ Resources Created:
+          • EC2 Instance: ${{ steps.outputs.outputs.instance_id }}
+          • Public IP: ${{ steps.outputs.outputs.public_ip }}
+          • S3 Bucket: my-vpn-configs-usernamezero-2025
+          • DynamoDB Table: terraform-locks
+          • Security Group: vpn-sg
+          
+          🔑 SSH Private Key saved as artifact
+          📝 SSH: ssh -i vpn_private_key.pem ubuntu@${{ steps.outputs.outputs.public_ip }}
+          
           ⏰ Time: ${{ steps.date.outputs.date }}
+          📍 Region: us-east-1
