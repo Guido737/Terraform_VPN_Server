@@ -23,16 +23,24 @@ jobs:
       run: |
         mkdir -p ~/.ssh
         ssh-keygen -t rsa -b 4096 -f ~/.ssh/id_rsa -N "" -q
+        echo "Generated public key:"
+        cat ~/.ssh/id_rsa.pub
 
     - name: Terraform Init
       run: terraform init
 
     - name: Terraform Plan
-      run: terraform plan -var="ssh_public_key_path=$HOME/.ssh/id_rsa.pub"
+      run: |
+        terraform plan \
+          -var="ssh_public_key_path=$HOME/.ssh/id_rsa.pub" \
+          -var="s3_bucket_name=my-vpn-configs-usernamezero-2025" \
+          -var="vpn_instance_type=t3.micro" \
+          -var="dynamodb_table_name=terraform-locks" \
+          -var="key_pair_name=vpn-key-prod"
     
     - name: Get current date
       id: date
-      run: echo "date=$(date)" >> $GITHUB_OUTPUT
+      run: echo "date=$(date +'%Y-%m-%d %H:%M:%S %Z')" >> $GITHUB_OUTPUT
 
     - name: Send Telegram notification
       uses: appleboy/telegram-action@v1.0.0
@@ -40,6 +48,14 @@ jobs:
         to: ${{ secrets.TELEGRAM_CHAT_ID }}
         token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
         message: |
-          📋 Terraform plan completed!
-          🖥️ Server: ${{ secrets.VPN_SERVER_IP }}
+          📋 Terraform Plan Completed!
+          
+          🚀 Planned Resources:
+          • EC2 VPN Server (t3.micro)
+          • S3 Bucket: my-vpn-configs-usernamezero-2025
+          • DynamoDB Table: terraform-locks
+          • Security Group with SSH/WireGuard
+          
+          ✅ SSH Key generated successfully
           ⏰ Time: ${{ steps.date.outputs.date }}
+          📍 Region: us-east-1
