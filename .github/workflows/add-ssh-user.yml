@@ -1,0 +1,42 @@
+name: Add SSH User
+on:
+  workflow_dispatch:
+    inputs:
+      username:
+        description: 'Username to add'
+        required: true
+        type: string
+      public_key:
+        description: 'SSH Public Key'
+        required: true
+        type: string
+
+jobs:
+  add-ssh-user:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Add user to VPN server
+      uses: appleboy/ssh-action@v1.0.3
+      with:
+        host: ${{ secrets.VPN_SERVER_IP }}
+        username: ubuntu
+        key: ${{ secrets.SSH_PRIVATE_KEY }}
+        script: |
+          sudo useradd -m -s /bin/bash ${{ github.event.inputs.username }}
+          sudo mkdir -p /home/${{ github.event.inputs.username }}/.ssh
+          echo "${{ github.event.inputs.public_key }}" | sudo tee /home/${{ github.event.inputs.username }}/.ssh/authorized_keys
+          sudo chown -R ${{ github.event.inputs.username }}:${{ github.event.inputs.username }} /home/${{ github.event.inputs.username }}/.ssh
+          sudo chmod 700 /home/${{ github.event.inputs.username }}/.ssh
+          sudo chmod 600 /home/${{ github.event.inputs.username }}/.ssh/authorized_keys
+          echo "User ${{ github.event.inputs.username }} added successfully!"
+
+    - name: Send Telegram notification
+      uses: appleboy/telegram-action@v1.0.0
+      with:
+        to: ${{ secrets.TELEGRAM_CHAT_ID }}
+        token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+        message: |
+          🆕 New user added to VPN server!
+          👤 Username: ${{ github.event.inputs.username }}
+          🖥️ Server: ${{ secrets.VPN_SERVER_IP }}
+          ⏰ Time: $(date

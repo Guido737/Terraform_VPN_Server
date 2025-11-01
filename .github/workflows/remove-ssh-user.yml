@@ -1,0 +1,33 @@
+name: Remove SSH User
+on:
+  workflow_dispatch:
+    inputs:
+      username:
+        description: 'Username to remove'
+        required: true
+        type: string
+
+jobs:
+  remove-ssh-user:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Remove user from VPN server
+      uses: appleboy/ssh-action@v1.0.3
+      with:
+        host: ${{ secrets.VPN_SERVER_IP }}
+        username: ubuntu
+        key: ${{ secrets.SSH_PRIVATE_KEY }}
+        script: |
+          sudo userdel -r ${{ github.event.inputs.username }}
+          echo "User ${{ github.event.inputs.username }} removed successfully!"
+
+    - name: Send Telegram notification
+      uses: appleboy/telegram-action@v1.0.0
+      with:
+        to: ${{ secrets.TELEGRAM_CHAT_ID }}
+        token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+        message: |
+          🗑️ User removed from VPN server!
+          👤 Username: ${{ github.event.inputs.username }}
+          🖥️ Server: ${{ secrets.VPN_SERVER_IP }}
+          ⏰ Time: $(date)

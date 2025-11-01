@@ -41,3 +41,27 @@ output "ssh_connection_info" {
   description = "Quick SSH connection command"
   value       = "ssh -i ~/.ssh/id_rsa ubuntu@${module.vpn_server.public_ip}"
 }
+
+#------------------------------------------------------------------------------
+# Server Public Key
+#------------------------------------------------------------------------------
+output "server_public_key" {
+  description = "WireGuard server public key"
+  value       = "X9l2X1CDdstM4RtCwV+gCE3BQ0ymT8bk2YbIjn7c9V8="
+}
+
+#------------------------------------------------------------------------------
+# S3 Bucket URL
+#------------------------------------------------------------------------------
+output "s3_bucket_url" {
+  description = "S3 bucket URL for client configs"
+  value       = "s3://my-vpn-configs-usernamezero-2025"
+}
+
+#------------------------------------------------------------------------------
+# Installed Scripts
+#------------------------------------------------------------------------------
+output "management_scripts_installed" {
+  description = "WireGuard management scripts are installed on server"
+  value       = true
+}
