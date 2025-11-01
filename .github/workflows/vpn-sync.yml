@@ -24,4 +24,4 @@ jobs:
         message: |
           🔄 VPN configurations synchronized!
           🖥️ Server: ${{ secrets.VPN_SERVER_IP }}
-          ⏰ Time: $(date)
+          ⏰ Time: ${{ steps.date.outputs.date }}

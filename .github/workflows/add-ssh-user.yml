@@ -39,4 +39,4 @@ jobs:
           🆕 New user added to VPN server!
           👤 Username: ${{ github.event.inputs.username }}
           🖥️ Server: ${{ secrets.VPN_SERVER_IP }}
-          ⏰ Time: $(date
+          ⏰ Time: ${{ steps.date.outputs.date }}
