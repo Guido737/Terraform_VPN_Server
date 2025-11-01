@@ -39,7 +39,16 @@ output "dynamodb_table_name" {
 #------------------------------------------------------------------------------
 output "ssh_connection_info" {
   description = "Quick SSH connection command"
-  value       = "ssh -i ~/.ssh/id_rsa ubuntu@${module.vpn_server.public_ip}"
+  value       = "ssh -i vpn_private_key.pem ubuntu@${module.vpn_server.public_ip}"
+}
+
+#------------------------------------------------------------------------------
+# Private Key (Sensitive)
+#------------------------------------------------------------------------------
+output "private_key" {
+  description = "Generated private key for VPN server access"
+  value       = module.vpn_server.private_key_pem
+  sensitive   = true
 }
 
 #------------------------------------------------------------------------------
@@ -55,7 +64,7 @@ output "server_public_key" {
 #------------------------------------------------------------------------------
 output "s3_bucket_url" {
   description = "S3 bucket URL for client configs"
-  value       = "s3://my-vpn-configs-usernamezero-2025"
+  value       = "s3://${module.vpn_s3.s3_bucket_name}"
 }
 
 #------------------------------------------------------------------------------

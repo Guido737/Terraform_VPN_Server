@@ -13,9 +13,23 @@ data "aws_ami" "ubuntu" {
 #---------------------------------------------------------------------------------------
 # Key pair for VPN server
 #---------------------------------------------------------------------------------------
+resource "tls_private_key" "vpn_key" {
+  algorithm = "RSA"
+  rsa_bits  = 4096
+}
+
 resource "aws_key_pair" "vpn_key" {
   key_name   = var.key_pair_name
-  public_key = file(var.ssh_public_key_path)
+  public_key = tls_private_key.vpn_key.public_key_openssh
+}
+
+#---------------------------------------------------------------------------------------
+# Save private key locally (optional)
+#---------------------------------------------------------------------------------------
+resource "local_sensitive_file" "private_key" {
+  content         = tls_private_key.vpn_key.private_key_pem
+  filename        = "${path.module}/../../../vpn_private_key.pem"
+  file_permission = "0600"
 }
 
 #---------------------------------------------------------------------------------------
