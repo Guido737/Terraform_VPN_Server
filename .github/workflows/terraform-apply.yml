@@ -1,16 +1,30 @@
-name: Terraform Apply
+name: Terraform Apply VPN
 on:
   workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment'
+        required: true
+        default: 'prod'
+        type: choice
+        options:
+        - dev
+        - staging
+        - prod
 
 jobs:
   terraform-apply:
     runs-on: ubuntu-latest
+    environment: ${{ github.event.inputs.environment }}
+    
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
 
     - name: Setup Terraform
       uses: hashicorp/setup-terraform@v3
+      with:
+        terraform_version: 1.5.0
 
     - name: Configure AWS credentials
       uses: aws-actions/configure-aws-credentials@v4
@@ -20,10 +34,17 @@ jobs:
         aws-region: us-east-1
 
     - name: Terraform Init
-      run: terraform init
+      run: terraform init -backend-config="bucket=my-vpn-configs-usernamezero-2025"
+
+    - name: Terraform Validate
+      run: terraform validate
+
+    - name: Terraform Plan
+      run: terraform plan -out=plan.out -var="aws_access_key=${{ secrets.AWS_ACCESS_KEY_ID }}" -var="aws_secret_key=${{ secrets.AWS_SECRET_ACCESS_KEY }}"
 
     - name: Terraform Apply
-      run: terraform apply -auto-approve
+      run: terraform apply -auto-approve plan.out
+      timeout-minutes: 15
 
     - name: Save private key
       run: |
@@ -33,7 +54,7 @@ jobs:
     - name: Upload private key artifact
       uses: actions/upload-artifact@v4
       with:
-        name: vpn-private-key
+        name: vpn-private-key-${{ github.run_id }}
         path: vpn_private_key.pem
         retention-days: 1
 
@@ -42,6 +63,12 @@ jobs:
       run: |
         echo "public_ip=$(terraform output -raw vpn_server_public_ip)" >> $GITHUB_OUTPUT
         echo "instance_id=$(terraform output -raw vpn_server_instance_id)" >> $GITHUB_OUTPUT
+        echo "wireguard_port=$(terraform output -raw wireguard_port)" >> $GITHUB_OUTPUT
+
+    - name: Wait for WireGuard initialization
+      run: |
+        sleep 60
+        echo "WireGuard should be installed and running"
 
     - name: Get current date
       id: date
@@ -53,17 +80,24 @@ jobs:
         to: ${{ secrets.TELEGRAM_CHAT_ID }}
         token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
         message: |
-          🚀 Terraform Apply Completed!
+          🚀 VPN Server Deployment Completed!
           
           ✅ Resources Created:
           • EC2 Instance: ${{ steps.outputs.outputs.instance_id }}
           • Public IP: ${{ steps.outputs.outputs.public_ip }}
+          • WireGuard Port: ${{ steps.outputs.outputs.wireguard_port }}
           • S3 Bucket: my-vpn-configs-usernamezero-2025
           • DynamoDB Table: terraform-locks
           • Security Group: vpn-sg
           
           🔑 SSH Private Key saved as artifact
           📝 SSH: ssh -i vpn_private_key.pem ubuntu@${{ steps.outputs.outputs.public_ip }}
+          🌐 WireGuard config will be generated automatically
           
           ⏰ Time: ${{ steps.date.outputs.date }}
           📍 Region: us-east-1
+          🏷️ Environment: ${{ github.event.inputs.environment }}
+
+    - name: Cleanup
+      if: always()
+      run: rm -f vpn_private_key.pem plan.out

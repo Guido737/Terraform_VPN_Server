@@ -1,0 +1,80 @@
+name: Add VPN Client
+
+on:
+  workflow_dispatch:
+    inputs:
+      client_name:
+        description: 'Client name (required)'
+        required: true
+        type: string
+      environment:
+        description: 'Environment'
+        required: true
+        default: 'production'
+        type: choice
+        options:
+        - staging
+        - production
+
+jobs:
+  add-client:
+    runs-on: ubuntu-latest
+    environment: ${{ github.event.inputs.environment }}
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: us-east-1
+
+    - name: Get server IP from Terraform state
+      id: terraform
+      run: |
+        aws s3 cp s3://my-vpn-configs-usernamezero-2025/terraform/state/terraform.tfstate ./tfstate.json
+        SERVER_IP=$(jq -r '.outputs.vpn_server_public_ip.value // empty' tfstate.json)
+        if [ -z "$SERVER_IP" ]; then
+          echo "Server not found in state"
+          exit 1
+        fi
+        echo "server_ip=$SERVER_IP" >> $GITHUB_OUTPUT
+
+    - name: Download private key
+      run: |
+        aws s3 cp s3://my-vpn-configs-usernamezero-2025/terraform/private-key/private_key.pem ./vpn_private_key.pem || true
+        chmod 600 vpn_private_key.pem
+
+    - name: Add VPN client
+      run: |
+        ssh -o StrictHostKeyChecking=no -i vpn_private_key.pem ubuntu@${{ steps.terraform.outputs.server_ip }} \
+          "sudo /usr/local/bin/add-vpn-client.sh ${{ github.event.inputs.client_name }}"
+
+    - name: Get current date
+      id: date
+      run: echo "date=$(date +'%Y-%m-%d %H:%M:%S %Z')" >> $GITHUB_OUTPUT
+
+    - name: Send client notification
+      uses: appleboy/telegram-action@v1.0.0
+      with:
+        to: ${{ secrets.TELEGRAM_CHAT_ID }}
+        token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+        message: |
+          👤 VPN Client Added!
+          
+          📊 Client Info:
+          • Client Name: ${{ github.event.inputs.client_name }}
+          • Server IP: ${{ steps.terraform.outputs.server_ip }}
+          • Environment: ${{ github.event.inputs.environment }}
+          
+          📁 Config Location:
+          s3://my-vpn-configs-usernamezero-2025/clients/${{ github.event.inputs.client_name }}.conf
+          
+          ⏰ Time: ${{ steps.date.outputs.date }}
+
+    - name: Cleanup
+      if: always()
+      run: rm -f vpn_private_key.pem tfstate.json

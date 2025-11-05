@@ -1,16 +1,30 @@
-name: Terraform Destroy
+name: Terraform Destroy VPN
 on:
   workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to destroy'
+        required: true
+        default: 'prod'
+        type: choice
+        options:
+        - dev
+        - staging
+        - prod
 
 jobs:
   terraform-destroy:
     runs-on: ubuntu-latest
+    environment: ${{ github.event.inputs.environment }}
+    
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
 
     - name: Setup Terraform
       uses: hashicorp/setup-terraform@v3
+      with:
+        terraform_version: 1.5.0
 
     - name: Configure AWS credentials
       uses: aws-actions/configure-aws-credentials@v4
@@ -20,10 +34,14 @@ jobs:
         aws-region: us-east-1
 
     - name: Terraform Init
-      run: terraform init
+      run: terraform init -backend-config="bucket=my-vpn-configs-usernamezero-2025"
+
+    - name: Terraform Plan Destroy
+      run: terraform plan -destroy -out=destroy.plan
 
     - name: Terraform Destroy
       run: terraform destroy -auto-approve
+      timeout-minutes: 10
 
     - name: Get current date
       id: date
@@ -35,12 +53,16 @@ jobs:
         to: ${{ secrets.TELEGRAM_CHAT_ID }}
         token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
         message: |
-          🗑️ Terraform destroy completed!
+          🗑️ Terraform Destroy Completed!
+          
           ✅ Resources Destroyed:
           • EC2 VPN Server Instance
           • S3 Bucket Encryption
           • Security Group (vpn-sg)
           • DynamoDB Table (terraform-locks)
           • Auto-generated Key Pair
-          🖥️ Server: ${{ secrets.VPN_SERVER_IP }}
+          • WireGuard Configuration
+          
           ⏰ Time: ${{ steps.date.outputs.date }}
+          📍 Region: us-east-1
+          🏷️ Environment: ${{ github.event.inputs.environment }}

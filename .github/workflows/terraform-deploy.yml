@@ -1,0 +1,106 @@
+name: Deploy VPN Server
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment'
+        required: true
+        default: 'production'
+        type: choice
+        options:
+        - staging
+        - production
+      client_name:
+        description: 'Add VPN client (optional)'
+        required: false
+        type: string
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: ${{ github.event.inputs.environment }}
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Terraform
+      uses: hashicorp/setup-terraform@v3
+
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: us-east-1
+
+    - name: Terraform Init
+      run: terraform init
+
+    - name: Terraform Plan
+      run: terraform plan -var="aws_access_key=${{ secrets.AWS_ACCESS_KEY_ID }}" -var="aws_secret_key=${{ secrets.AWS_SECRET_ACCESS_KEY }}"
+
+    - name: Terraform Apply
+      run: terraform apply -auto-approve -var="aws_access_key=${{ secrets.AWS_ACCESS_KEY_ID }}" -var="aws_secret_key=${{ secrets.AWS_SECRET_ACCESS_KEY }}"
+
+    - name: Save private key
+      run: |
+        terraform output -raw private_key > vpn_private_key.pem
+        chmod 600 vpn_private_key.pem
+
+    - name: Upload private key artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: vpn-private-key
+        path: vpn_private_key.pem
+        retention-days: 1
+
+    - name: Get server info
+      id: terraform_outputs
+      run: |
+        echo "public_ip=$(terraform output -raw vpn_server_public_ip)" >> $GITHUB_OUTPUT
+        echo "instance_id=$(terraform output -raw vpn_server_instance_id)" >> $GITHUB_OUTPUT
+
+    - name: Wait for WireGuard initialization
+      run: sleep 30
+
+    - name: Add VPN client
+      if: ${{ github.event.inputs.client_name != '' }}
+      run: |
+        ssh -o StrictHostKeyChecking=no -i vpn_private_key.pem ubuntu@${{ steps.terraform_outputs.outputs.public_ip }} \
+          "sudo /usr/local/bin/add-vpn-client.sh ${{ github.event.inputs.client_name }}"
+
+    - name: Get current date
+      id: date
+      run: echo "date=$(date +'%Y-%m-%d %H:%M:%S %Z')" >> $GITHUB_OUTPUT
+
+    - name: Send deployment notification
+      uses: appleboy/telegram-action@v1.0.0
+      with:
+        to: ${{ secrets.TELEGRAM_CHAT_ID }}
+        token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+        message: |
+          🚀 VPN Server Deployed Successfully!
+          
+          📊 Deployment Info:
+          • Environment: ${{ github.event.inputs.environment }}
+          • Instance: ${{ steps.terraform_outputs.outputs.instance_id }}
+          • Public IP: ${{ steps.terraform_outputs.outputs.public_ip }}
+          • Region: us-east-1
+          
+          ✅ Services Running:
+          • WireGuard VPN (Port: 51820)
+          • SSH Access
+          • S3 Config Storage
+          
+          ${{ github.event.inputs.client_name && format('• Client Added: {0}', github.event.inputs.client_name) || '• No clients added' }}
+          
+          🔑 Private key saved as artifact
+          📝 SSH: ssh -i vpn_private_key.pem ubuntu@${{ steps.terraform_outputs.outputs.public_ip }}
+          
+          ⏰ Time: ${{ steps.date.outputs.date }}
+
+    - name: Cleanup
+      if: always()
+      run: rm -f vpn_private_key.pem
