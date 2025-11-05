@@ -38,10 +38,6 @@ jobs:
     - name: Terraform Init
       run: terraform init
 
-    # ======================================================
-    # ✅ AUTO-IMPORT SECTION — FIXES DUPLICATE ERRORS
-    # ======================================================
-
     - name: Import DynamoDB Lock Table (if exists)
       run: |
         if aws dynamodb describe-table --table-name terraform-locks >/dev/null 2>&1; then
@@ -68,15 +64,11 @@ jobs:
             module.vpn_server.aws_security_group.vpn_sg "$SG_ID" || true
         fi
 
-    # ======================================================
-    # END OF AUTO-IMPORT
-    # ======================================================
-
     - name: Terraform Plan
-      run: terraform plan -var="aws_access_key=${{ secrets.AWS_ACCESS_KEY_ID }}" -var="aws_secret_key=${{ secrets.AWS_SECRET_ACCESS_KEY }}"
+      run: terraform plan
 
     - name: Terraform Apply
-      run: terraform apply -auto-approve -var="aws_access_key=${{ secrets.AWS_ACCESS_KEY_ID }}" -var="aws_secret_key=${{ secrets.AWS_SECRET_ACCESS_KEY }}"
+      run: terraform apply -auto-approve
 
     - name: Save private key
       run: |
