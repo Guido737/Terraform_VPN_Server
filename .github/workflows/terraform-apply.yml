@@ -1,4 +1,5 @@
 name: Terraform Apply VPN
+
 on:
   workflow_dispatch:
     inputs:
@@ -8,15 +9,15 @@ on:
         default: 'prod'
         type: choice
         options:
-        - dev
-        - staging
-        - prod
+          - dev
+          - staging
+          - prod
 
 jobs:
   terraform-apply:
     runs-on: ubuntu-latest
     environment: ${{ github.event.inputs.environment }}
-    
+
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
@@ -33,8 +34,13 @@ jobs:
         aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
         aws-region: us-east-1
 
-    - name: Terraform Init
-      run: terraform init -backend-config="bucket=my-vpn-configs-usernamezero-2025"
+    - name: Terraform Init (fixed backend)
+      run: |
+        terraform init \
+          -backend-config="bucket=my-vpn-configs-usernamezero-2025" \
+          -backend-config="key=vpn_server/terraform.tfstate" \
+          -backend-config="region=us-east-1" \
+          -backend-config="dynamodb_table=terraform-locks"
 
     - name: Terraform Validate
       run: terraform validate
@@ -42,10 +48,8 @@ jobs:
     - name: Terraform Plan
       run: terraform plan -out=plan.out
 
-    - name: Terraform Apply (with conflict handling)
-      run: |
-        terraform apply -auto-approve plan.out || \
-        terraform apply -auto-approve -target="module.vpn_server.aws_instance.vpn_server"
+    - name: Terraform Apply
+      run: terraform apply -auto-approve plan.out
       timeout-minutes: 15
 
     - name: Save private key
@@ -68,9 +72,7 @@ jobs:
         echo "wireguard_port=$(terraform output -raw wireguard_port)" >> $GITHUB_OUTPUT
 
     - name: Wait for WireGuard initialization
-      run: |
-        sleep 60
-        echo "WireGuard should be installed and running"
+      run: sleep 60
 
     - name: Get current date
       id: date
@@ -84,17 +86,15 @@ jobs:
         message: |
           🚀 VPN Server Deployment Completed!
           
-          ✅ Resources Created:
-          • EC2 Instance: ${{ steps.outputs.outputs.instance_id }}
-          • Public IP: ${{ steps.outputs.outputs.public_ip }}
-          • WireGuard Port: ${{ steps.outputs.outputs.wireguard_port }}
-          
-          🔑 SSH Private Key saved as artifact
+          ✅ EC2 Instance: ${{ steps.outputs.outputs.instance_id }}
+          ✅ Public IP: ${{ steps.outputs.outputs.public_ip }}
+          ✅ WireGuard Port: ${{ steps.outputs.outputs.wireguard_port }}
+
+          🔑 SSH Key saved as artifact
           📝 SSH: ssh -i vpn_private_key.pem ubuntu@${{ steps.outputs.outputs.public_ip }}
-          🌐 WireGuard config will be generated automatically
-          
+
           ⏰ Time: ${{ steps.date.outputs.date }}
-          📍 Region: us-east-1
+          🌐 Region: us-east-1
           🏷️ Environment: ${{ github.event.inputs.environment }}
 
     - name: Cleanup
