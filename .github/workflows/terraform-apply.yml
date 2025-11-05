@@ -45,7 +45,7 @@ jobs:
     - name: Terraform Apply (with conflict handling)
       run: |
         terraform apply -auto-approve plan.out || \
-        terraform apply -auto-approve -target="module.vpn_server" -target="module.vpn_s3"
+        terraform apply -auto-approve -target="module.vpn_server.aws_instance.vpn_server"
       timeout-minutes: 15
 
     - name: Save private key
@@ -88,8 +88,6 @@ jobs:
           • EC2 Instance: ${{ steps.outputs.outputs.instance_id }}
           • Public IP: ${{ steps.outputs.outputs.public_ip }}
           • WireGuard Port: ${{ steps.outputs.outputs.wireguard_port }}
-          • S3 Bucket: my-vpn-configs-usernamezero-2025
-          • Security Group: vpn-sg
           
           🔑 SSH Private Key saved as artifact
           📝 SSH: ssh -i vpn_private_key.pem ubuntu@${{ steps.outputs.outputs.public_ip }}
