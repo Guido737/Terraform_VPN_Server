@@ -42,8 +42,10 @@ jobs:
     - name: Terraform Plan
       run: terraform plan -out=plan.out -var="aws_access_key=${{ secrets.AWS_ACCESS_KEY_ID }}" -var="aws_secret_key=${{ secrets.AWS_SECRET_ACCESS_KEY }}"
 
-    - name: Terraform Apply
-      run: terraform apply -auto-approve plan.out
+    - name: Terraform Apply (with conflict handling)
+      run: |
+        terraform apply -auto-approve plan.out || \
+        terraform apply -auto-approve -target="module.vpn_server" -target="module.vpn_s3"
       timeout-minutes: 15
 
     - name: Save private key
@@ -87,7 +89,6 @@ jobs:
           • Public IP: ${{ steps.outputs.outputs.public_ip }}
           • WireGuard Port: ${{ steps.outputs.outputs.wireguard_port }}
           • S3 Bucket: my-vpn-configs-usernamezero-2025
-          • DynamoDB Table: terraform-locks
           • Security Group: vpn-sg
           
           🔑 SSH Private Key saved as artifact
