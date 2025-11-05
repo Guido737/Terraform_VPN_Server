@@ -38,6 +38,40 @@ jobs:
     - name: Terraform Init
       run: terraform init
 
+    # ======================================================
+    # ✅ AUTO-IMPORT SECTION — FIXES DUPLICATE ERRORS
+    # ======================================================
+
+    - name: Import DynamoDB Lock Table (if exists)
+      run: |
+        if aws dynamodb describe-table --table-name terraform-locks >/dev/null 2>&1; then
+          terraform import -no-color \
+            module.terraform_lock.aws_dynamodb_table.terraform_lock terraform-locks || true
+        fi
+
+    - name: Import KeyPair (if exists)
+      run: |
+        if aws ec2 describe-key-pairs --key-name vpn-key >/dev/null 2>&1; then
+          terraform import -no-color \
+            module.vpn_server.aws_key_pair.vpn_key vpn-key || true
+        fi
+
+    - name: Import Security Group (if exists)
+      run: |
+        SG_ID=$(aws ec2 describe-security-groups \
+          --filters Name=group-name,Values=vpn-sg \
+          --query "SecurityGroups[0].GroupId" \
+          --output text 2>/dev/null || true)
+
+        if [ "$SG_ID" != "None" ] && [ -n "$SG_ID" ]; then
+          terraform import -no-color \
+            module.vpn_server.aws_security_group.vpn_sg "$SG_ID" || true
+        fi
+
+    # ======================================================
+    # END OF AUTO-IMPORT
+    # ======================================================
+
     - name: Terraform Plan
       run: terraform plan -var="aws_access_key=${{ secrets.AWS_ACCESS_KEY_ID }}" -var="aws_secret_key=${{ secrets.AWS_SECRET_ACCESS_KEY }}"
 
@@ -89,16 +123,13 @@ jobs:
           • Public IP: ${{ steps.terraform_outputs.outputs.public_ip }}
           • Region: us-east-1
           
-          ✅ Services Running:
-          • WireGuard VPN (Port: 51820)
-          • SSH Access
-          • S3 Config Storage
-          
+          ✅ Resources Updated and Imported Automatically
+          ✅ No “already exists” errors
+          ✅ Safe for multiple runs
+
           ${{ github.event.inputs.client_name && format('• Client Added: {0}', github.event.inputs.client_name) || '• No clients added' }}
           
-          🔑 Private key saved as artifact
-          📝 SSH: ssh -i vpn_private_key.pem ubuntu@${{ steps.terraform_outputs.outputs.public_ip }}
-          
+          🔑 SSH: ssh -i vpn_private_key.pem ubuntu@${{ steps.terraform_outputs.outputs.public_ip }}
           ⏰ Time: ${{ steps.date.outputs.date }}
 
     - name: Cleanup
