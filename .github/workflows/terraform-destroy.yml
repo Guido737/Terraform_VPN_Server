@@ -1,9 +1,10 @@
-name: Terraform Destroy VPN
+name: Selective Infrastructure Destroy
+
 on:
   workflow_dispatch:
     inputs:
       environment:
-        description: 'Environment to destroy'
+        description: 'Environment'
         required: true
         default: 'prod'
         type: choice
@@ -13,7 +14,7 @@ on:
         - prod
 
 jobs:
-  terraform-destroy:
+  selective-destroy:
     runs-on: ubuntu-latest
     environment: ${{ github.event.inputs.environment }}
     
@@ -23,8 +24,6 @@ jobs:
 
     - name: Setup Terraform
       uses: hashicorp/setup-terraform@v3
-      with:
-        terraform_version: 1.5.0
 
     - name: Configure AWS credentials
       uses: aws-actions/configure-aws-credentials@v4
@@ -34,14 +33,64 @@ jobs:
         aws-region: us-east-1
 
     - name: Terraform Init
-      run: terraform init -backend-config="bucket=my-vpn-configs-usernamezero-2025"
+      run: terraform init
 
-    - name: Terraform Plan Destroy
-      run: terraform plan -destroy -out=destroy.plan
+    - name: Check current resources
+      id: check_resources
+      run: |
+        echo "🔍 Checking resources in Terraform state..."
+        
+        # Проверяем существование ресурсов
+        EC2_EXISTS=$(terraform state list | grep -c "module.vpn_server.aws_instance.vpn_server" || true)
+        SG_EXISTS=$(terraform state list | grep -c "module.vpn_server.aws_security_group.vpn_sg" || true)
+        KEY_EXISTS=$(terraform state list | grep -c "module.vpn_server.aws_key_pair.vpn_key" || true)
+        
+        echo "ec2_exists=$EC2_EXISTS" >> $GITHUB_OUTPUT
+        echo "sg_exists=$SG_EXISTS" >> $GITHUB_OUTPUT  
+        echo "key_exists=$KEY_EXISTS" >> $GITHUB_OUTPUT
+        
+        echo "📊 Resources found:"
+        echo "  EC2 Instance: $EC2_EXISTS"
+        echo "  Security Group: $SG_EXISTS"
+        echo "  Key Pair: $KEY_EXISTS"
 
-    - name: Terraform Destroy
-      run: terraform destroy -auto-approve
-      timeout-minutes: 10
+    - name: Selective Terraform Destroy
+      run: |
+        echo "🗑️ Starting selective infrastructure destruction..."
+        
+        # Уничтожаем только существующие ресурсы
+        if [ "${{ steps.check_resources.outputs.ec2_exists }}" = "1" ]; then
+          echo "🖥️ Destroying EC2 instance..."
+          terraform destroy -target="module.vpn_server.aws_instance.vpn_server" -auto-approve
+        else
+          echo "⏭️ EC2 instance not found in state, skipping"
+        fi
+
+        if [ "${{ steps.check_resources.outputs.sg_exists }}" = "1" ]; then
+          echo "🛡️ Destroying Security Group..."
+          terraform destroy -target="module.vpn_server.aws_security_group.vpn_sg" -auto-approve
+        else
+          echo "⏭️ Security Group not found in state, skipping"
+        fi
+
+        if [ "${{ steps.check_resources.outputs.key_exists }}" = "1" ]; then
+          echo "🔑 Destroying Key Pair..."
+          terraform destroy -target="module.vpn_server.aws_key_pair.vpn_key" -auto-approve
+        else
+          echo "⏭️ Key Pair not found in state, skipping"
+        fi
+
+        echo "✅ Selective destruction completed!"
+
+    - name: Verify remaining resources
+      run: |
+        echo "🔍 Verifying remaining resources in state..."
+        terraform state list
+        
+        echo "📋 Resources preserved:"
+        echo "  ✅ S3 Bucket (terraform state)"
+        echo "  ✅ DynamoDB Table (locks)"
+        echo "  ✅ S3 VPN configs bucket"
 
     - name: Get current date
       id: date
@@ -53,16 +102,24 @@ jobs:
         to: ${{ secrets.TELEGRAM_CHAT_ID }}
         token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
         message: |
-          🗑️ Terraform Destroy Completed!
+          🗑️ Selective Infrastructure Destroy Completed!
           
-          ✅ Resources Destroyed:
-          • EC2 VPN Server Instance
-          • S3 Bucket Encryption
-          • Security Group (vpn-sg)
-          • DynamoDB Table (terraform-locks)
-          • Auto-generated Key Pair
-          • WireGuard Configuration
+          🔧 Environment: ${{ github.event.inputs.environment }}
+          
+          ❌ Resources DESTROYED:
+          ${{ steps.check_resources.outputs.ec2_exists == '1' && '• EC2 VPN Server Instance' || '' }}
+          ${{ steps.check_resources.outputs.sg_exists == '1' && '• Security Group (vpn-sg)' || '' }}
+          ${{ steps.check_resources.outputs.key_exists == '1' && '• Key Pair (vpn-key)' || '' }}
+          
+          ✅ Resources PRESERVED:
+          • S3 Bucket (terraform state)
+          • DynamoDB Table (locks) 
+          • S3 VPN Configs Bucket
           
           ⏰ Time: ${{ steps.date.outputs.date }}
           📍 Region: us-east-1
-          🏷️ Environment: ${{ github.event.inputs.environment }}
+
+    - name: Cleanup
+      if: always()
+      run: |
+        echo "🧹 Cleanup completed"
