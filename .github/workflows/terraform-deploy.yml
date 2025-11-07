@@ -18,72 +18,65 @@ on:
 
 jobs:
   deploy:
-    runs-on: ubuntu-latest
-    environment: ${{ github.event.inputs.environment }}
+    runs-on: ubuntu-24.04
 
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-    - name: Set up Terraform
-      uses: hashicorp/setup-terraform@v3
-      with:
-        terraform_version: 1.7.5
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.7.5
 
-    - name: Configure AWS credentials
-      uses: aws-actions/configure-aws-credentials@v4
-      with:
-        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-        aws-region: us-east-1
+      - name: Terraform Init
+        working-directory: ./terraform
+        run: terraform init -upgrade
 
-    - name: Terraform Init
-      working-directory: ./terraform
-      run: terraform init -upgrade
+      - name: Terraform Import (auto-fix existing resources)
+        working-directory: ./terraform
+        continue-on-error: true
+        run: terraform plan -out=tfplan || true
 
-    - name: Terraform Import Auto-Heal
-      working-directory: ./terraform
-      continue-on-error: true
-      run: terraform plan -out=tfplan || true
+      - name: Terraform Plan
+        working-directory: ./terraform
+        run: terraform plan -out=tfplan
 
-    - name: Terraform Plan
-      working-directory: ./terraform
-      run: terraform plan -out=tfplan
+      - name: Terraform Apply
+        working-directory: ./terraform
+        run: terraform apply -auto-approve tfplan
 
-    - name: Terraform Apply
-      working-directory: ./terraform
-      run: terraform apply -auto-approve tfplan
+      - name: Get Terraform Outputs
+        id: terraform_outputs
+        working-directory: ./terraform
+        run: |
+          echo "instance_id=$(terraform output -raw instance_id)" >> $GITHUB_OUTPUT
+          echo "public_ip=$(terraform output -raw public_ip)" >> $GITHUB_OUTPUT
 
-    - name: Get Terraform Outputs
-      id: terraform_outputs
-      working-directory: ./terraform
-      run: |
-        echo "instance_id=$(terraform output -raw instance_id)" >> $GITHUB_OUTPUT
-        echo "public_ip=$(terraform output -raw public_ip)" >> $GITHUB_OUTPUT
+      - name: Get current date
+        id: date
+        run: echo "date=$(date '+%Y-%m-%d %H:%M:%S')" >> $GITHUB_OUTPUT
 
-    - name: Get current date
-      id: date
-      run: echo "date=$(date +'%Y-%m-%d %H:%M:%S %Z')" >> $GITHUB_OUTPUT
+      - name: Send Telegram notification
+        uses: appleboy/telegram-action@v1.0.0
+        with:
+          to: ${{ secrets.TELEGRAM_CHAT_ID }}
+          token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          parse_mode: Markdown
+          message: |
+            🚀 *VPN Server Deployed Successfully!*
 
-    - name: Send Telegram notification
-      uses: appleboy/telegram-action@v1.0.0
-      with:
-        to: ${{ secrets.TELEGRAM_CHAT_ID }}
-        token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-        message: |
-          🚀 VPN Server Deployed Successfully!
+            📊 *Deployment Info:*
+            • Environment: `${{ github.event.inputs.environment }}`
+            • Instance: `${{ steps.terraform_outputs.outputs.instance_id }}`
+            • Public IP: `${{ steps.terraform_outputs.outputs.public_ip }}`
+            • Region: `us-east-1`
 
-          📊 Deployment Info:
-          • Environment: ${{ github.event.inputs.environment }}
-          • Instance: ${{ steps.terraform_outputs.outputs.instance_id }}
-          • Public IP: ${{ steps.terraform_outputs.outputs.public_ip }}
-          • Region: us-east-1
+            ✅ Resources Updated and Imported Automatically  
+            ✅ No “already exists” errors  
+            ✅ Safe for multiple runs
 
-          ✅ Resources Updated and Imported Automatically
-          ✅ No “already exists” errors
-          ✅ Safe for multiple runs
+            ${{ github.event.inputs.client_name && format('• Client Added: {0}', github.event.inputs.client_name) || '• No clients added' }}
 
-          ${{ github.event.inputs.client_name != '' && format('• Client Added: {0}', github.event.inputs.client_name) || '• No clients added' }}
-
-          🔑 SSH: ssh -i vpn_private_key.pem ubuntu@${{ steps.terraform_outputs.outputs.public_ip }}
-          ⏰ Time: ${{ steps.date.outputs.date }}
+            🔑 SSH: `ssh -i vpn_private_key.pem ubuntu@${{ steps.terraform_outputs.outputs.public_ip }}`
+            ⏰ Time: `${{ steps.date.outputs.date }}`
