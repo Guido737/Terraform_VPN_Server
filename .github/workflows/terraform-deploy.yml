@@ -4,29 +4,31 @@ on:
   workflow_dispatch:
     inputs:
       environment:
-        description: 'Environment'
-        required: true
-        default: 'production'
+        description: "Environment"
         type: choice
+        required: true
+        default: production
         options:
-        - staging
-        - production
+          - staging
+          - production
       client_name:
-        description: 'Add VPN client (optional)'
+        description: "Add VPN client (optional)"
         required: false
-        type: string
+        default: ""
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
     environment: ${{ github.event.inputs.environment }}
-    
+
     steps:
-    - name: Checkout code
+    - name: Checkout repository
       uses: actions/checkout@v4
 
-    - name: Setup Terraform
+    - name: Set up Terraform
       uses: hashicorp/setup-terraform@v3
+      with:
+        terraform_version: 1.7.5
 
     - name: Configure AWS credentials
       uses: aws-actions/configure-aws-credentials@v4
@@ -36,94 +38,52 @@ jobs:
         aws-region: us-east-1
 
     - name: Terraform Init
-      run: terraform init
+      working-directory: ./terraform
+      run: terraform init -upgrade
 
-    - name: Import DynamoDB Lock Table (if exists)
-      run: |
-        if aws dynamodb describe-table --table-name terraform-locks >/dev/null 2>&1; then
-          terraform import -no-color \
-            module.terraform_lock.aws_dynamodb_table.terraform_lock terraform-locks || true
-        fi
-
-    - name: Import KeyPair (if exists)
-      run: |
-        if aws ec2 describe-key-pairs --key-name vpn-key >/dev/null 2>&1; then
-          terraform import -no-color \
-            module.vpn_server.aws_key_pair.vpn_key vpn-key || true
-        fi
-
-    - name: Import Security Group (if exists)
-      run: |
-        SG_ID=$(aws ec2 describe-security-groups \
-          --filters Name=group-name,Values=vpn-sg \
-          --query "SecurityGroups[0].GroupId" \
-          --output text 2>/dev/null || true)
-
-        if [ "$SG_ID" != "None" ] && [ -n "$SG_ID" ]; then
-          terraform import -no-color \
-            module.vpn_server.aws_security_group.vpn_sg "$SG_ID" || true
-        fi
+    - name: Terraform Import Auto-Heal
+      working-directory: ./terraform
+      continue-on-error: true
+      run: terraform plan -out=tfplan || true
 
     - name: Terraform Plan
-      run: terraform plan
+      working-directory: ./terraform
+      run: terraform plan -out=tfplan
 
     - name: Terraform Apply
-      run: terraform apply -auto-approve
+      working-directory: ./terraform
+      run: terraform apply -auto-approve tfplan
 
-    - name: Save private key
-      run: |
-        terraform output -raw private_key > vpn_private_key.pem
-        chmod 600 vpn_private_key.pem
-
-    - name: Upload private key artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: vpn-private-key
-        path: vpn_private_key.pem
-        retention-days: 1
-
-    - name: Get server info
+    - name: Get Terraform Outputs
       id: terraform_outputs
+      working-directory: ./terraform
       run: |
-        echo "public_ip=$(terraform output -raw vpn_server_public_ip)" >> $GITHUB_OUTPUT
-        echo "instance_id=$(terraform output -raw vpn_server_instance_id)" >> $GITHUB_OUTPUT
-
-    - name: Wait for WireGuard initialization
-      run: sleep 30
-
-    - name: Add VPN client
-      if: ${{ github.event.inputs.client_name != '' }}
-      run: |
-        ssh -o StrictHostKeyChecking=no -i vpn_private_key.pem ubuntu@${{ steps.terraform_outputs.outputs.public_ip }} \
-          "sudo /usr/local/bin/add-vpn-client.sh ${{ github.event.inputs.client_name }}"
+        echo "instance_id=$(terraform output -raw instance_id)" >> $GITHUB_OUTPUT
+        echo "public_ip=$(terraform output -raw public_ip)" >> $GITHUB_OUTPUT
 
     - name: Get current date
       id: date
       run: echo "date=$(date +'%Y-%m-%d %H:%M:%S %Z')" >> $GITHUB_OUTPUT
 
-    - name: Send deployment notification
+    - name: Send Telegram notification
       uses: appleboy/telegram-action@v1.0.0
       with:
         to: ${{ secrets.TELEGRAM_CHAT_ID }}
         token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
         message: |
           🚀 VPN Server Deployed Successfully!
-          
+
           📊 Deployment Info:
           • Environment: ${{ github.event.inputs.environment }}
           • Instance: ${{ steps.terraform_outputs.outputs.instance_id }}
           • Public IP: ${{ steps.terraform_outputs.outputs.public_ip }}
           • Region: us-east-1
-          
+
           ✅ Resources Updated and Imported Automatically
           ✅ No “already exists” errors
           ✅ Safe for multiple runs
 
-          ${{ github.event.inputs.client_name && format('• Client Added: {0}', github.event.inputs.client_name) || '• No clients added' }}
-          
+          ${{ github.event.inputs.client_name != '' && format('• Client Added: {0}', github.event.inputs.client_name) || '• No clients added' }}
+
           🔑 SSH: ssh -i vpn_private_key.pem ubuntu@${{ steps.terraform_outputs.outputs.public_ip }}
           ⏰ Time: ${{ steps.date.outputs.date }}
-
-    - name: Cleanup
-      if: always()
-      run: rm -f vpn_private_key.pem

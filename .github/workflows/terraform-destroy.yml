@@ -17,13 +17,15 @@ jobs:
   selective-destroy:
     runs-on: ubuntu-latest
     environment: ${{ github.event.inputs.environment }}
-    
+
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
 
     - name: Setup Terraform
       uses: hashicorp/setup-terraform@v3
+      with:
+        terraform_version: 1.7.5
 
     - name: Configure AWS credentials
       uses: aws-actions/configure-aws-credentials@v4
@@ -32,10 +34,13 @@ jobs:
         aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
         aws-region: us-east-1
 
+    - name: Download Terraform state
+      run: |
+        aws s3 cp s3://my-vpn-configs-usernamezero-2025/terraform/state/terraform.tfstate ./tfstate.json
+
     - name: Get instance ID from state file
       id: get_instance
       run: |
-        aws s3 cp s3://my-vpn-configs-usernamezero-2025/terraform/state/terraform.tfstate ./tfstate.json
         INSTANCE_ID=$(jq -r '.resources[] | select(.type=="aws_instance") | .instances[0].attributes.id' tfstate.json 2>/dev/null || true)
         echo "instance_id=$INSTANCE_ID" >> $GITHUB_OUTPUT
 
@@ -43,7 +48,7 @@ jobs:
       if: steps.get_instance.outputs.instance_id != '' && steps.get_instance.outputs.instance_id != 'null'
       run: |
         aws ec2 terminate-instances --instance-ids ${{ steps.get_instance.outputs.instance_id }}
-        echo "EC2 instance termination initiated"
+        echo "EC2 termination initiated"
 
     - name: Get security group ID
       id: get_sg
@@ -55,9 +60,9 @@ jobs:
       if: steps.get_sg.outputs.sg_id != '' && steps.get_sg.outputs.sg_id != 'null'
       run: |
         aws ec2 delete-security-group --group-id ${{ steps.get_sg.outputs.sg_id }} || true
-        echo "Security group deletion attempted"
+        echo "Security Group deletion attempted"
 
-    - name: Remove resources from terraform state
+    - name: Remove destroyed resources from Terraform state
       run: |
         terraform init
         terraform state rm module.vpn_server.aws_instance.vpn_server || true
@@ -75,16 +80,16 @@ jobs:
         token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
         message: |
           🗑️ Selective Destroy Completed via AWS CLI!
-          
+
           🔧 Environment: ${{ github.event.inputs.environment }}
-          
+
           ❌ Resources DESTROYED:
           ${{ steps.get_instance.outputs.instance_id && '• EC2 Instance' || '' }}
           ${{ steps.get_sg.outputs.sg_id && '• Security Group' || '' }}
           • Key Pair (state only)
-          
+
           ✅ Resources PRESERVED:
           • S3 Bucket
           • DynamoDB Table
-          
+
           ⏰ Time: ${{ steps.date.outputs.date }}
