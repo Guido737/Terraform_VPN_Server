@@ -37,21 +37,18 @@ jobs:
 
       - name: Terraform Init
         run: terraform init -upgrade
-        working-directory: ./terraform
 
       - name: Import DynamoDB Lock Table (if exists)
         run: |
           if aws dynamodb describe-table --table-name terraform-locks >/dev/null 2>&1; then
             terraform import -no-color module.terraform_lock.aws_dynamodb_table.terraform_lock terraform-locks || true
           fi
-        working-directory: ./terraform
 
       - name: Import KeyPair (if exists)
         run: |
           if aws ec2 describe-key-pairs --key-name vpn-key >/dev/null 2>&1; then
             terraform import -no-color module.vpn_server.aws_key_pair.vpn_key vpn-key || true
           fi
-        working-directory: ./terraform
 
       - name: Import Security Group (if exists)
         run: |
@@ -61,21 +58,17 @@ jobs:
           if [ "$SG_ID" != "None" ] && [ -n "$SG_ID" ]; then
             terraform import -no-color module.vpn_server.aws_security_group.vpn_sg "$SG_ID" || true
           fi
-        working-directory: ./terraform
 
       - name: Terraform Plan
         run: terraform plan -out=plan.out
-        working-directory: ./terraform
 
       - name: Terraform Apply
         run: terraform apply -auto-approve plan.out
-        working-directory: ./terraform
 
       - name: Save private key
         run: |
           terraform output -raw private_key > vpn_private_key.pem
           chmod 600 vpn_private_key.pem
-        working-directory: ./terraform
 
       - name: Upload private key artifact
         uses: actions/upload-artifact@v4
@@ -89,7 +82,6 @@ jobs:
         run: |
           echo "public_ip=$(terraform output -raw vpn_server_public_ip)" >> $GITHUB_OUTPUT
           echo "instance_id=$(terraform output -raw vpn_server_instance_id)" >> $GITHUB_OUTPUT
-        working-directory: ./terraform
 
       - name: Wait for WireGuard initialization
         run: sleep 30
@@ -122,7 +114,7 @@ jobs:
             ✅ No “already exists” errors
             ✅ Safe for multiple runs
 
-            ${{ github.event.inputs.client_name != '' && '• Client Added: ' + github.event.inputs.client_name || '• No clients added' }}
+            ${{ github.event.inputs.client_name != '' && format('• Client Added: {0}', github.event.inputs.client_name) || '• No clients added' }}
 
             🔑 SSH: ssh -i vpn_private_key.pem ubuntu@${{ steps.terraform_outputs.outputs.public_ip }}
             ⏰ Time: ${{ steps.date.outputs.date }}
