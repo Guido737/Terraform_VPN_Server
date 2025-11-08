@@ -54,6 +54,21 @@ jobs:
             terraform import -no-color module.terraform_lock.aws_dynamodb_table.terraform_lock terraform-locks || true
           fi
 
+      - name: Import existing AWS resources to prevent conflicts
+        run: |
+          # Import Key Pair if exists
+          if aws ec2 describe-key-pairs --key-name vpn-key >/dev/null 2>&1; then
+            terraform import -no-color module.vpn_server.aws_key_pair.vpn_key vpn-key || true
+          fi
+          
+          # Import Security Group if exists
+          SG_ID=$(aws ec2 describe-security-groups \
+            --filters Name=group-name,Values=vpn-sg \
+            --query "SecurityGroups[0].GroupId" --output text 2>/dev/null || echo "")
+          if [ -n "$SG_ID" ] && [ "$SG_ID" != "None" ]; then
+            terraform import -no-color module.vpn_server.aws_security_group.vpn_sg "$SG_ID" || true
+          fi
+
       - name: Terraform Plan
         run: terraform plan -out=plan.out
 
@@ -89,7 +104,7 @@ jobs:
             exit 1
           fi
 
-      - name: Wait for WireGuard initialization
+      - name: Wait for server availability
         run: |
           for i in $(seq 1 6); do
             echo "Waiting for server (attempt $i)..."
@@ -129,8 +144,7 @@ jobs:
             ✅ Existing servers unaffected
             ✅ Safe for multiple deployments
 
-            ${{ github.event.inputs.client_name && format('• Client Added: {0}', github.event.inputs.client_name) }}
-            ${{ github.event.inputs.client_name == '' && '• No clients added' }}
+            ${{ github.event.inputs.client_name && format('• Client Added: {0}', github.event.inputs.client_name) || '• No clients added' }}
 
             🔑 SSH: ssh -i vpn_private_key.pem ubuntu@${{ steps.terraform_outputs.outputs.public_ip }}
             ⏰ Time: ${{ steps.date.outputs.date }}
