@@ -1,0 +1,53 @@
+name: Configure WireGuard VPN
+
+on:
+  workflow_run:
+    workflows: ["Deploy VPN Server"]
+    types:
+      - completed
+
+jobs:
+  setup-wireguard:
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Upload and run setup script
+      env:
+        SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+        AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        VPN_SERVER_IP: ${{ secrets.VPN_SERVER_IP }}
+      run: |
+        # Setup SSH
+        mkdir -p ~/.ssh
+        echo "$SSH_PRIVATE_KEY" > ~/.ssh/vpn_key
+        chmod 600 ~/.ssh/vpn_key
+        
+        cat > ~/.ssh/config << EOF
+        Host $VPN_SERVER_IP
+          StrictHostKeyChecking no
+          UserKnownHostsFile /dev/null
+          IdentityFile ~/.ssh/vpn_key
+        EOF
+
+        # Wait for server
+        sleep 30
+
+        # Upload and run setup script
+        scp scripts/setup-wireguard.sh ubuntu@$VPN_SERVER_IP:/tmp/
+        ssh ubuntu@$VPN_SERVER_IP "chmod +x /tmp/setup-wireguard.sh && AWS_ACCESS_KEY_ID='$AWS_ACCESS_KEY_ID' AWS_SECRET_ACCESS_KEY='$AWS_SECRET_ACCESS_KEY' /tmp/setup-wireguard.sh"
+
+    - name: Telegram notification
+      uses: appleboy/telegram-action@master
+      with:
+        to: ${{ secrets.TELEGRAM_CHAT_ID }}
+        token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+        message: |
+          ✅ WireGuard VPN настроен!
+          🖥️ Сервер: ${{ secrets.VPN_SERVER_IP }}
+          📍 Регион: us-east-1
+          🕐 Время: ${{ github.event.workflow_run.updated_at }}
