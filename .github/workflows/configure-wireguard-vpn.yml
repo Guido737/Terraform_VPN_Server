@@ -15,31 +15,56 @@ jobs:
     - name: Checkout repository
       uses: actions/checkout@v4
 
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: us-east-1
+
+    - name: Get VPN Server IP from Terraform state
+      id: get_ip
+      run: |
+        aws s3 cp s3://my-vpn-configs-usernamezero-2025/terraform/state/terraform.tfstate ./tfstate.json
+        SERVER_IP=$(jq -r '.outputs.vpn_server_public_ip.value' tfstate.json)
+        if [ -z "$SERVER_IP" ] || [ "$SERVER_IP" = "null" ]; then
+          echo "ERROR: Could not get server IP from Terraform state"
+          exit 1
+        fi
+        
+        echo "server_ip=$SERVER_IP" >> $GITHUB_OUTPUT
+        echo "Discovered VPN Server IP: $SERVER_IP"
+
     - name: Upload and run setup script
       env:
         SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
         AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
         AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-        VPN_SERVER_IP: ${{ secrets.VPN_SERVER_IP }}
+        
       run: |
-        # Setup SSH
+
         mkdir -p ~/.ssh
         echo "$SSH_PRIVATE_KEY" > ~/.ssh/vpn_key
         chmod 600 ~/.ssh/vpn_key
         
         cat > ~/.ssh/config << EOF
-        Host $VPN_SERVER_IP
+        Host ${{ steps.get_ip.outputs.server_ip }}
           StrictHostKeyChecking no
           UserKnownHostsFile /dev/null
           IdentityFile ~/.ssh/vpn_key
         EOF
 
-        # Wait for server
-        sleep 30
+        # Wait for server to be fully ready
+        echo "Waiting for server to be ready..."
+        sleep 45
 
-        # Upload and run setup script
-        scp scripts/setup-wireguard.sh ubuntu@$VPN_SERVER_IP:/tmp/
-        ssh ubuntu@$VPN_SERVER_IP "chmod +x /tmp/setup-wireguard.sh && AWS_ACCESS_KEY_ID='$AWS_ACCESS_KEY_ID' AWS_SECRET_ACCESS_KEY='$AWS_SECRET_ACCESS_KEY' /tmp/setup-wireguard.sh"
+        # Upload setup script
+        echo "Uploading setup script..."
+        scp scripts/setup-wireguard.sh ubuntu@${{ steps.get_ip.outputs.server_ip }}:/tmp/
+
+        # Run setup script
+        echo "Running WireGuard setup..."
+        ssh ubuntu@${{ steps.get_ip.outputs.server_ip }} "chmod +x /tmp/setup-wireguard.sh && AWS_ACCESS_KEY_ID='$AWS_ACCESS_KEY_ID' AWS_SECRET_ACCESS_KEY='$AWS_SECRET_ACCESS_KEY' /tmp/setup-wireguard.sh"
 
     - name: Telegram notification
       uses: appleboy/telegram-action@master
@@ -47,7 +72,12 @@ jobs:
         to: ${{ secrets.TELEGRAM_CHAT_ID }}
         token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
         message: |
-          ✅ WireGuard VPN настроен!
-          🖥️ Сервер: ${{ secrets.VPN_SERVER_IP }}
-          📍 Регион: us-east-1
-          🕐 Время: ${{ github.event.workflow_run.updated_at }}
+          ✅ WireGuard VPN Successfully Configured!
+          
+          🖥️ Server: ${{ steps.get_ip.outputs.server_ip }}
+          📍 Region: us-east-1  
+          🕐 Deployment Time: ${{ github.event.workflow_run.updated_at }}
+          
+          🔧 Status: Ready for client connections
+          📡 Port: 51820 UDP
+          🌐 VPN Network: 10.0.0.0/24
