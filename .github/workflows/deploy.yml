@@ -97,12 +97,48 @@ jobs:
       - name: Upload Terraform state to S3
         run: |
           BUCKET="my-vpn-configs-usernamezero-2025"
-          if aws s3 ls "s3://$BUCKET" >/dev/null 2>&1; then
-            aws s3 cp terraform.tfstate "s3://$BUCKET/terraform/state/${{ steps.workspace.outputs.workspace_name }}/terraform.tfstate"
+          WORKSPACE_NAME="${{ steps.workspace.outputs.workspace_name }}"
+          
+          echo "Searching for Terraform state file..."
+          
+          # Ищем state файл в разных возможных местах
+          if [ -f "terraform.tfstate" ]; then
+            STATE_FILE="terraform.tfstate"
+            echo "Found state file: $STATE_FILE"
+          elif [ -d "terraform.tfstate.d" ]; then
+            # Ищем в директории workspace
+            if [ -f "terraform.tfstate.d/$WORKSPACE_NAME/terraform.tfstate" ]; then
+              STATE_FILE="terraform.tfstate.d/$WORKSPACE_NAME/terraform.tfstate"
+              echo "Found state file in workspace directory: $STATE_FILE"
+            else
+              # Берем первый найденный state файл в директории
+              FIRST_STATE=$(find terraform.tfstate.d -name "terraform.tfstate" -type f | head -1)
+              if [ -n "$FIRST_STATE" ]; then
+                STATE_FILE="$FIRST_STATE"
+                echo "Found state file: $STATE_FILE"
+              else
+                echo "ERROR: No Terraform state file found in terraform.tfstate.d"
+                echo "Available files in terraform.tfstate.d:"
+                find terraform.tfstate.d -type f 2>/dev/null || echo "No files found"
+                exit 1
+              fi
+            fi
           else
-            echo "S3 bucket missing: $BUCKET"
+            echo "ERROR: No Terraform state file or directory found"
+            echo "Current directory contents:"
+            ls -la
             exit 1
           fi
+          
+          # Создаем директорию в S3
+          echo "Creating S3 directory structure..."
+          aws s3api put-object --bucket "$BUCKET" --key "terraform/state/$WORKSPACE_NAME/" --content-length 0 >/dev/null 2>&1 || true
+          
+          # Загружаем state файл
+          echo "Uploading state file to S3..."
+          aws s3 cp "$STATE_FILE" "s3://$BUCKET/terraform/state/$WORKSPACE_NAME/terraform.tfstate"
+          
+          echo "✅ State uploaded successfully to: s3://$BUCKET/terraform/state/$WORKSPACE_NAME/terraform.tfstate"
 
       - name: Wait for server availability
         run: |
