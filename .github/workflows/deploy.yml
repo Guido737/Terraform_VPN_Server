@@ -129,7 +129,8 @@ jobs:
             ✅ Existing servers unaffected
             ✅ Safe for multiple deployments
 
-            ${{ github.event.inputs.client_name != '' && format('• Client Added: {0}', github.event.inputs.client_name) || '• No clients added' }}
+            ${{ github.event.inputs.client_name && format('• Client Added: {0}', github.event.inputs.client_name) }}
+            ${{ github.event.inputs.client_name == '' && '• No clients added' }}
 
             🔑 SSH: ssh -i vpn_private_key.pem ubuntu@${{ steps.terraform_outputs.outputs.public_ip }}
             ⏰ Time: ${{ steps.date.outputs.date }}
