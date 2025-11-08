@@ -36,27 +36,23 @@ jobs:
           aws-region: us-east-1
 
       - name: Terraform Init
+        run: |
+          terraform init -upgrade
+          terraform validate || true
         run: terraform init -upgrade
+
+      - name: Create or select Terraform workspace
+        id: workspace
+        run: |
+          WORKSPACE_NAME="${{ github.event.inputs.environment }}-${{ github.run_id }}"
+          terraform workspace select $WORKSPACE_NAME || terraform workspace new $WORKSPACE_NAME
+          echo "workspace_name=$WORKSPACE_NAME" >> $GITHUB_OUTPUT
+          echo "Using workspace: $WORKSPACE_NAME"
 
       - name: Import DynamoDB Lock Table (if exists)
         run: |
           if aws dynamodb describe-table --table-name terraform-locks >/dev/null 2>&1; then
             terraform import -no-color module.terraform_lock.aws_dynamodb_table.terraform_lock terraform-locks || true
-          fi
-
-      - name: Import KeyPair (if exists)
-        run: |
-          if aws ec2 describe-key-pairs --key-name vpn-key >/dev/null 2>&1; then
-            terraform import -no-color module.vpn_server.aws_key_pair.vpn_key vpn-key || true
-          fi
-
-      - name: Import Security Group (if exists)
-        run: |
-          SG_ID=$(aws ec2 describe-security-groups \
-            --filters Name=group-name,Values=vpn-sg \
-            --query "SecurityGroups[0].GroupId" --output text 2>/dev/null || true)
-          if [ "$SG_ID" != "None" ] && [ -n "$SG_ID" ]; then
-            terraform import -no-color module.vpn_server.aws_security_group.vpn_sg "$SG_ID" || true
           fi
 
       - name: Terraform Plan
@@ -73,7 +69,7 @@ jobs:
       - name: Upload private key artifact
         uses: actions/upload-artifact@v4
         with:
-          name: vpn-private-key
+          name: vpn-private-key-${{ github.run_id }}
           path: vpn_private_key.pem
           retention-days: 1
 
@@ -82,9 +78,28 @@ jobs:
         run: |
           echo "public_ip=$(terraform output -raw vpn_server_public_ip)" >> $GITHUB_OUTPUT
           echo "instance_id=$(terraform output -raw vpn_server_instance_id)" >> $GITHUB_OUTPUT
+          echo "workspace=$(terraform workspace show)" >> $GITHUB_OUTPUT
+
+      - name: Upload Terraform state to S3
+        run: |
+          BUCKET="my-vpn-configs-usernamezero-2025"
+          if aws s3 ls "s3://$BUCKET" >/dev/null 2>&1; then
+            aws s3 cp terraform.tfstate s3://$BUCKET/terraform/state/${{ steps.workspace.outputs.workspace_name }}/terraform.tfstate
+          else
+            echo "S3 bucket missing: $BUCKET"
+            exit 1
+          fi s3://my-vpn-configs-usernamezero-2025/terraform/state/${{ steps.workspace.outputs.workspace_name }}/terraform.tfstate
 
       - name: Wait for WireGuard initialization
-        run: sleep 30
+        run: |
+          for i in {1..6}; do
+            echo "Waiting for server (attempt $i)..."
+            if nc -z ${{ steps.terraform_outputs.outputs.public_ip }} 22; then
+              echo "SSH reachable"
+              break
+            fi
+            sleep 10
+          done
 
       - name: Add VPN client
         if: ${{ github.event.inputs.client_name != '' }}
@@ -102,17 +117,18 @@ jobs:
           to: ${{ secrets.TELEGRAM_CHAT_ID }}
           token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           message: |
-            🚀 VPN Server Deployed Successfully!
+            🚀 NEW VPN Server Deployed Successfully!
 
             📊 Deployment Info:
             • Environment: ${{ github.event.inputs.environment }}
+            • Workspace: ${{ steps.workspace.outputs.workspace_name }}
             • Instance: ${{ steps.terraform_outputs.outputs.instance_id }}
             • Public IP: ${{ steps.terraform_outputs.outputs.public_ip }}
             • Region: us-east-1
 
-            ✅ Resources Updated and Imported Automatically
-            ✅ No “already exists” errors
-            ✅ Safe for multiple runs
+            ✅ New parallel instance created
+            ✅ Existing servers unaffected
+            ✅ Safe for multiple deployments
 
             ${{ github.event.inputs.client_name != '' && format('• Client Added: {0}', github.event.inputs.client_name) || '• No clients added' }}
 

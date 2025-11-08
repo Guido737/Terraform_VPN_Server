@@ -10,7 +10,7 @@ jobs:
   setup-wireguard:
     if: ${{ github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
-    
+
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
@@ -22,31 +22,53 @@ jobs:
         aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
         aws-region: us-east-1
 
-    - name: Get VPN Server IP from Terraform state
+    - name: Find latest workspace and get IP
       id: get_ip
       run: |
-        aws s3 cp s3://my-vpn-configs-usernamezero-2025/terraform/state/terraform.tfstate ./tfstate.json
+        # Ищем самый новый workspace по дате создания
+        echo "Searching for latest workspace..."
+        
+        # Получаем список всех workspace state файлов и сортируем по дате (новые сначала)
+        LATEST_STATE=$(aws s3 ls s3://my-vpn-configs-usernamezero-2025/terraform/state/ --recursive | \
+          grep "terraform.tfstate" | sort -r | head -1)
+        
+        if [ -z "$LATEST_STATE" ]; then
+          echo "ERROR: No Terraform state files found"
+          exit 1
+        fi
+        
+        # Извлекаем путь к state файлу
+        STATE_PATH=$(echo "$LATEST_STATE" | awk '{print $4}')
+        WORKSPACE_NAME=$(echo "$STATE_PATH" | cut -d'/' -f3)
+        
+        echo "Latest workspace: $WORKSPACE_NAME"
+        echo "State path: $STATE_PATH"
+        
+        # Скачиваем самый новый state файл
+        aws s3 cp s3://my-vpn-configs-usernamezero-2025/$STATE_PATH ./tfstate.json
+        
+        # Извлекаем IP из state
         SERVER_IP=$(jq -r '.outputs.vpn_server_public_ip.value' tfstate.json)
+        
         if [ -z "$SERVER_IP" ] || [ "$SERVER_IP" = "null" ]; then
-          echo "ERROR: Could not get server IP from Terraform state"
+          echo "ERROR: Could not get server IP from state file"
           exit 1
         fi
         
         echo "server_ip=$SERVER_IP" >> $GITHUB_OUTPUT
-        echo "Discovered VPN Server IP: $SERVER_IP"
+        echo "workspace_name=$WORKSPACE_NAME" >> $GITHUB_OUTPUT
+        echo "Discovered VPN Server IP: $SERVER_IP (Workspace: $WORKSPACE_NAME)"
 
     - name: Upload and run setup script
       env:
         SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
         AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
         AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-        
       run: |
-
         mkdir -p ~/.ssh
         echo "$SSH_PRIVATE_KEY" > ~/.ssh/vpn_key
         chmod 600 ~/.ssh/vpn_key
-        
+
         cat > ~/.ssh/config << EOF
         Host ${{ steps.get_ip.outputs.server_ip }}
           StrictHostKeyChecking no
@@ -54,15 +76,12 @@ jobs:
           IdentityFile ~/.ssh/vpn_key
         EOF
 
-        # Wait for server to be fully ready
         echo "Waiting for server to be ready..."
         sleep 45
 
-        # Upload setup script
         echo "Uploading setup script..."
         scp scripts/setup-wireguard.sh ubuntu@${{ steps.get_ip.outputs.server_ip }}:/tmp/
 
-        # Run setup script
         echo "Running WireGuard setup..."
         ssh ubuntu@${{ steps.get_ip.outputs.server_ip }} "chmod +x /tmp/setup-wireguard.sh && AWS_ACCESS_KEY_ID='$AWS_ACCESS_KEY_ID' AWS_SECRET_ACCESS_KEY='$AWS_SECRET_ACCESS_KEY' /tmp/setup-wireguard.sh"
 
@@ -73,11 +92,12 @@ jobs:
         token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
         message: |
           ✅ WireGuard VPN Successfully Configured!
-          
+
           🖥️ Server: ${{ steps.get_ip.outputs.server_ip }}
-          📍 Region: us-east-1  
-          🕐 Deployment Time: ${{ github.event.workflow_run.updated_at }}
-          
+          📍 Region: us-east-1
+          🏷️ Workspace: ${{ steps.get_ip.outputs.workspace_name }}
+          🕐 Time: ${{ github.event.workflow_run.updated_at }}
+
           🔧 Status: Ready for client connections
           📡 Port: 51820 UDP
           🌐 VPN Network: 10.0.0.0/24
