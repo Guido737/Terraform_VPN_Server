@@ -52,22 +52,28 @@ jobs:
       id: find_instance
       run: |
         SERVER_IP="${{ github.event.inputs.server_ip }}"
-
-        INSTANCE_ID=$(aws ec2 describe-instances \
-          --filters "Name=ip-address,Values=$SERVER_IP" "Name=public-ip-address,Values=$SERVER_IP" \
-          --query 'Reservations[].Instances[].InstanceId' \
-          --output text)
-
-        if [ -z "$INSTANCE_ID" ]; then
+        
+        echo "Searching for instance with public IP: $SERVER_IP"
+        
+        INSTANCES_JSON=$(aws ec2 describe-instances \
+          --filters "Name=instance-state-name,Values=running" \
+          --query 'Reservations[].Instances[]' \
+          --output json)
+        
+        INSTANCE_ID=$(echo "$INSTANCES_JSON" | \
+          jq -r --arg ip "$SERVER_IP" '.[] | select(.PublicIpAddress == $ip) | .InstanceId')
+        
+        if [ -z "$INSTANCE_ID" ] || [ "$INSTANCE_ID" = "null" ]; then
           echo "ERROR: No running instance found with public IP: $SERVER_IP"
+          echo ""
+          echo "Available running instances with public IPs:"
+          echo "$INSTANCES_JSON" | jq -r '.[] | "• \(.InstanceId) | \(.PublicIpAddress) | \(.Tags[]? | select(.Key=="Name") | .Value // "Unnamed")"'
           exit 1
         fi
-
-        INSTANCE_NAME=$(aws ec2 describe-instances \
-          --instance-ids $INSTANCE_ID \
-          --query 'Reservations[0].Instances[0].Tags[?Key==`Name`].Value|[0]' \
-          --output text)
-
+        
+        INSTANCE_NAME=$(echo "$INSTANCES_JSON" | \
+          jq -r --arg id "$INSTANCE_ID" '.[] | select(.InstanceId == $id) | .Tags[]? | select(.Key=="Name") | .Value // "Unnamed"')
+        
         echo "instance_id=$INSTANCE_ID" >> $GITHUB_OUTPUT
         echo "instance_name=$INSTANCE_NAME" >> $GITHUB_OUTPUT
         echo "Found instance: $INSTANCE_NAME ($INSTANCE_ID)"
