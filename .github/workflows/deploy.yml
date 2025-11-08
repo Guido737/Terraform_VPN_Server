@@ -39,13 +39,12 @@ jobs:
         run: |
           terraform init -upgrade
           terraform validate || true
-        run: terraform init -upgrade
 
       - name: Create or select Terraform workspace
         id: workspace
         run: |
           WORKSPACE_NAME="${{ github.event.inputs.environment }}-${{ github.run_id }}"
-          terraform workspace select $WORKSPACE_NAME || terraform workspace new $WORKSPACE_NAME
+          terraform workspace select "$WORKSPACE_NAME" || terraform workspace new "$WORKSPACE_NAME"
           echo "workspace_name=$WORKSPACE_NAME" >> $GITHUB_OUTPUT
           echo "Using workspace: $WORKSPACE_NAME"
 
@@ -84,11 +83,11 @@ jobs:
         run: |
           BUCKET="my-vpn-configs-usernamezero-2025"
           if aws s3 ls "s3://$BUCKET" >/dev/null 2>&1; then
-            aws s3 cp terraform.tfstate s3://$BUCKET/terraform/state/${{ steps.workspace.outputs.workspace_name }}/terraform.tfstate
+            aws s3 cp terraform.tfstate "s3://$BUCKET/terraform/state/${{ steps.workspace.outputs.workspace_name }}/terraform.tfstate"
           else
             echo "S3 bucket missing: $BUCKET"
             exit 1
-          fi s3://my-vpn-configs-usernamezero-2025/terraform/state/${{ steps.workspace.outputs.workspace_name }}/terraform.tfstate
+          fi
 
       - name: Wait for WireGuard initialization
         run: |
