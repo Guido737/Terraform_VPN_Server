@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       server_ip:
-        description: 'Public IP of the VPN server'
+        description: 'Public IP of VPN Server'
         required: true
         type: string
         placeholder: 'e.g., 44.222.99.206'
@@ -14,57 +14,58 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+    - name: Checkout repository
+      uses: actions/checkout@v4
 
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: us-east-1
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: us-east-1
 
-      - name: Set server IP
-        run: echo "server_ip=${{ github.event.inputs.server_ip }}" >> $GITHUB_ENV
+    - name: Upload and run setup script
+      env:
+        SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+        AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      run: |
+        SERVER_IP="${{ github.event.inputs.server_ip }}"
+        if [ -z "$SERVER_IP" ]; then
+          echo "ERROR: server_ip not provided"
+          exit 1
+        fi
 
-      - name: Upload and run setup script
-        env:
-          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          SERVER_IP: ${{ github.event.inputs.server_ip }}
-        run: |
-          mkdir -p ~/.ssh
-          echo "$SSH_PRIVATE_KEY" > ~/.ssh/vpn_key
-          chmod 600 ~/.ssh/vpn_key
+        mkdir -p ~/.ssh
+        echo "$SSH_PRIVATE_KEY" > ~/.ssh/vpn_key
+        chmod 600 ~/.ssh/vpn_key
 
-          cat > ~/.ssh/config << EOF
-          Host $SERVER_IP
-            StrictHostKeyChecking no
-            UserKnownHostsFile /dev/null
-            IdentityFile ~/.ssh/vpn_key
-          EOF
+        cat > ~/.ssh/config << EOF
+        Host $SERVER_IP
+          StrictHostKeyChecking no
+          UserKnownHostsFile /dev/null
+          IdentityFile ~/.ssh/vpn_key
+        EOF
 
-          echo "Waiting for server to be ready..."
-          sleep 30
+        echo "Waiting for server to be ready..."
+        sleep 20
 
-          echo "Uploading setup script..."
-          scp scripts/setup-wireguard.sh ubuntu@$SERVER_IP:/tmp/
+        echo "Uploading setup script..."
+        scp scripts/setup-wireguard.sh ubuntu@$SERVER_IP:/tmp/
 
-          echo "Running WireGuard setup..."
-          ssh ubuntu@$SERVER_IP "chmod +x /tmp/setup-wireguard.sh && AWS_ACCESS_KEY_ID='$AWS_ACCESS_KEY_ID' AWS_SECRET_ACCESS_KEY='$AWS_SECRET_ACCESS_KEY' /tmp/setup-wireguard.sh"
+        echo "Running WireGuard setup..."
+        ssh ubuntu@$SERVER_IP "chmod +x /tmp/setup-wireguard.sh && AWS_ACCESS_KEY_ID='$AWS_ACCESS_KEY_ID' AWS_SECRET_ACCESS_KEY='$AWS_SECRET_ACCESS_KEY' /tmp/setup-wireguard.sh"
 
-      - name: Telegram notification
-        uses: appleboy/telegram-action@master
-        with:
-          to: ${{ secrets.TELEGRAM_CHAT_ID }}
-          token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          message: |
-            ✅ WireGuard VPN Successfully Configured!
-
-            🖥️ Server: ${{ github.event.inputs.server_ip }}
-            📍 Region: us-east-1
-            🕐 Time: ${{ github.event.head_commit.timestamp }}
-            🔧 Status: Ready for client connections
-            📡 Port: 51820 UDP
-            🌐 VPN Network: 10.0.0.0/24
+    - name: Telegram notification
+      uses: appleboy/telegram-action@master
+      with:
+        to: ${{ secrets.TELEGRAM_CHAT_ID }}
+        token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+        message: |
+          ✅ WireGuard VPN Successfully Configured!
+          🖥️ Server: ${{ github.event.inputs.server_ip }}
+          📍 Region: us-east-1
+          🕐 Time: ${{ github.event.head_commit.timestamp }}
+          🔧 Status: Ready for client connections
+          📡 Port: 51820 UDP
+          🌐 VPN Network: 10.0.0.0/24
