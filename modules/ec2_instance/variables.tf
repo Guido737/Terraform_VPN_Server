@@ -41,3 +41,11 @@ variable "s3_bucket_name" {
   type        = string
   default     = "my-vpn-configs-usernamezero-2025"
 }
+
+#------------------------------------------------------------------------------
+# S3 VPN Private Key
+#------------------------------------------------------------------------------
+variable "vpn_private_key_s3_key" {
+  type    = string
+  default = "keys/vpn_private_key.pem"
+}
