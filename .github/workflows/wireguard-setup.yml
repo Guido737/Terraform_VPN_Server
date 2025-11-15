@@ -36,7 +36,7 @@ jobs:
           fi
 
           mkdir -p ~/.ssh
-          
+
           # Download SSH key from S3
           echo "Downloading SSH key from S3..."
           aws s3 cp s3://my-vpn-configs-usernamezero-2025/keys/vpn_private_key_production.pem ~/.ssh/vpn_key
@@ -53,9 +53,11 @@ jobs:
           echo "Uploading setup-wireguard.sh to server..."
           scp -i ~/.ssh/vpn_key -o StrictHostKeyChecking=no ./scripts/setup-wireguard.sh ubuntu@$SERVER_IP:/tmp/setup-wireguard.sh
 
-          # Run the script
+          # Run the script with DEBIAN_FRONTEND=noninteractive
           echo "Running setup-wireguard.sh on server..."
-          ssh -i ~/.ssh/vpn_key -o StrictHostKeyChecking=no ubuntu@$SERVER_IP "sudo bash /tmp/setup-wireguard.sh"
+          ssh -i ~/.ssh/vpn_key -o StrictHostKeyChecking=no ubuntu@$SERVER_IP << 'EOF'
+            sudo DEBIAN_FRONTEND=noninteractive bash /tmp/setup-wireguard.sh
+          EOF
 
       - name: Telegram notification
         uses: appleboy/telegram-action@master
