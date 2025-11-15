@@ -63,14 +63,11 @@ jobs:
           echo "Downloading WireGuard scripts from S3..."
           aws s3 cp s3://my-vpn-configs-usernamezero-2025/scripts/ ./wg-scripts/ --recursive
 
+          # Copy scripts to server
           echo "Uploading scripts to server..."
           scp -r ./wg-scripts ubuntu@$SERVER_IP:/tmp/
 
-          # Run wg-create-manual.sh to generate server keys if missing
-          echo "Running wg-create-manual.sh on server..."
-          ssh ubuntu@$SERVER_IP "sudo bash /tmp/wg-scripts/wg-create-manual.sh"
-
-          # Now run wg-sync-configs.sh
+          # Run wg-sync-configs.sh to set up WireGuard
           echo "Running wg-sync-configs.sh on server..."
           ssh ubuntu@$SERVER_IP "sudo bash /tmp/wg-scripts/wg-sync-configs.sh"
 
