@@ -47,7 +47,7 @@ if [ ! -f ~/.ssh/vpn_key ]; then
 fi
 
 #------------------------------------------------------------------------------
-# Generate server keys (только если их нет)
+# Generate server keys
 #------------------------------------------------------------------------------
 if [ ! -f privatekey ] || [ ! -f publickey ]; then
     echo "Generating server keys..."
