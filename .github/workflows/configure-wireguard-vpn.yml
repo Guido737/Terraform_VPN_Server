@@ -24,7 +24,7 @@ jobs:
         aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
         aws-region: us-east-1
 
-    - name: Upload and run WireGuard setup
+    - name: Upload and run WireGuard scripts
       env:
         AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
         AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
@@ -37,36 +37,37 @@ jobs:
 
         mkdir -p ~/.ssh
         
-        # Download SSH key from S3 (try multiple possible names)
+        # Download SSH key from S3
         echo "Downloading SSH key from S3..."
-        if aws s3 cp s3://my-vpn-configs-usernamezero-2025/keys/vpn_private_key_production.pem ~/.ssh/vpn_key; then
-          echo "✅ Using key: vpn_private_key_production.pem"
-        elif aws s3 cp "s3://my-vpn-configs-usernamezero-2025/keys/vpn_private_key.pem-production-19390587704" ~/.ssh/vpn_key; then
-          echo "✅ Using key: vpn_private_key.pem-production-19390587704"
-        else
-          echo "❌ ERROR: No SSH key found in S3"
-          echo "Available keys in S3:"
-          aws s3 ls s3://my-vpn-configs-usernamezero-2025/keys/ || true
-          exit 1
-        fi
-
+        aws s3 cp s3://my-vpn-configs-usernamezero-2025/keys/vpn_private_key_production.pem ~/.ssh/vpn_key
         chmod 600 ~/.ssh/vpn_key
 
         cat > ~/.ssh/config << EOF
-        Host $SERVER_IP
-          StrictHostKeyChecking no
-          UserKnownHostsFile /dev/null
-          IdentityFile ~/.ssh/vpn_key
-        EOF
+Host $SERVER_IP
+  StrictHostKeyChecking no
+  UserKnownHostsFile /dev/null
+  IdentityFile ~/.ssh/vpn_key
+EOF
 
+        # Wait until SSH is ready
         echo "Waiting for server to be ready..."
-        sleep 20
+        until ssh -o ConnectTimeout=5 ubuntu@$SERVER_IP "echo ready" >/dev/null 2>&1; do
+          echo "Waiting for SSH..."
+          sleep 5
+        done
 
-        echo "Uploading setup script..."
-        scp scripts/setup-wireguard.sh ubuntu@$SERVER_IP:/tmp/
+        # Download scripts from S3 locally
+        mkdir -p ./wg-scripts
+        echo "Downloading WireGuard scripts from S3..."
+        aws s3 cp s3://my-vpn-configs-usernamezero-2025/scripts/ ./wg-scripts/ --recursive
 
-        echo "Running WireGuard setup..."
-        ssh ubuntu@$SERVER_IP "sudo AWS_ACCESS_KEY_ID='$AWS_ACCESS_KEY_ID' AWS_SECRET_ACCESS_KEY='$AWS_SECRET_ACCESS_KEY' /tmp/setup-wireguard.sh"
+        # Copy scripts to server
+        echo "Uploading scripts to server..."
+        scp -r ./wg-scripts ubuntu@$SERVER_IP:/tmp/
+
+        # Run wg-sync-configs.sh
+        echo "Running wg-sync-configs.sh on server..."
+        ssh ubuntu@$SERVER_IP "sudo bash /tmp/wg-scripts/wg-sync-configs.sh"
 
     - name: Telegram notification
       uses: appleboy/telegram-action@master
