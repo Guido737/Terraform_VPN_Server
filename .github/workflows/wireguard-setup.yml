@@ -1,17 +1,8 @@
-name: WireGuard Setup
+name: Configure WireGuard VPN
 
 on:
   workflow_dispatch:
     inputs:
-      environment:
-        description: 'Environment'
-        required: true
-        default: 'production'
-        type: choice
-        options:
-          - staging
-          - production
-
       server_ip:
         description: 'Public IP of VPN Server'
         required: true
@@ -19,28 +10,55 @@ on:
         placeholder: 'e.g., 44.222.99.206'
 
 jobs:
-  setup:
-    runs-on: ubuntu-24.04
+  setup-wireguard:
+    runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repo
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Configure SSH
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+
+      - name: Upload and run WireGuard scripts
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
         run: |
+          SERVER_IP="${{ github.event.inputs.server_ip }}"
+          if [ -z "$SERVER_IP" ]; then
+            echo "ERROR: server_ip not provided"
+            exit 1
+          fi
+
           mkdir -p ~/.ssh
-          echo "${{ secrets.SERVER_PRIVATE_KEY }}" > ~/.ssh/id_rsa
-          chmod 600 ~/.ssh/id_rsa
-          ssh-keyscan -H ${{ github.event.inputs.server_ip }} >> ~/.ssh/known_hosts
 
-      - name: Copy scripts to server
-        run: |
-          scp -r scripts ubuntu@${{ github.event.inputs.server_ip }}:/tmp/wg-scripts
+          # Download SSH key from S3
+          echo "Downloading SSH key from S3..."
+          if ! aws s3 cp s3://my-vpn-configs-usernamezero-2025/keys/vpn_private_key_production.pem ~/.ssh/vpn_key; then
+            echo "❌ ERROR: Failed to download SSH key from S3"
+            exit 1
+          fi
+          chmod 600 ~/.ssh/vpn_key
 
-      - name: Run main WireGuard setup script
-        run: |
-          ssh ubuntu@${{ github.event.inputs.server_ip }} \
-            "sudo bash /tmp/wg-scripts/setup-wireguard.sh ${{ github.event.inputs.environment }}"
+          # Wait until SSH is ready
+          echo "Waiting for server to be ready..."
+          until ssh -i ~/.ssh/vpn_key -o ConnectTimeout=5 -o StrictHostKeyChecking=no ubuntu@$SERVER_IP "echo ready" >/dev/null 2>&1; do
+            echo "Waiting for SSH..."
+            sleep 5
+          done
+
+          # Upload scripts using correct key
+          echo "Uploading scripts to server..."
+          scp -i ~/.ssh/vpn_key -o StrictHostKeyChecking=no -r ./scripts ubuntu@$SERVER_IP:/tmp/wg-scripts
+
+          # Run setup-wireguard.sh on server
+          echo "Running setup-wireguard.sh on server..."
+          ssh -i ~/.ssh/vpn_key -o StrictHostKeyChecking=no ubuntu@$SERVER_IP "sudo bash /tmp/wg-scripts/setup-wireguard.sh"
 
       - name: Telegram notification
         uses: appleboy/telegram-action@master
@@ -50,8 +68,8 @@ jobs:
           message: |
             ✅ WireGuard VPN Successfully Configured!
             🖥️ Server: ${{ github.event.inputs.server_ip }}
-            🌍 Environment: ${{ github.event.inputs.environment }}
-            🕐 Time: ${{ github.event.head_commit.timestamp || github.event.repository.updated_at }}
+            📍 Region: us-east-1
+            🕐 Time: ${{ github.event.head_commit.timestamp }}
             🔧 Status: Ready for client connections
-            📡 Port: 51820/UDP
+            📡 Port: 51820 UDP
             🌐 VPN Network: 10.0.0.0/24
