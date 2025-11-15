@@ -28,9 +28,7 @@ export DEBIAN_FRONTEND=noninteractive
 for i in {1..3}; do
     sudo rm -f /var/lib/dpkg/lock-frontend /var/cache/debconf/config.dat
     sudo dpkg --configure -a
-    echo iptables-persistent iptables-persistent/autosave_v4 boolean true | sudo debconf-set-selections
-    echo iptables-persistent iptables-persistent/autosave_v6 boolean true | sudo debconf-set-selections
-    
+
     if sudo apt-get update -y && \
        sudo apt-get install -y wireguard qrencode awscli iptables-persistent; then
         echo "Packages installed successfully"
@@ -46,6 +44,7 @@ for i in {1..3}; do
     echo "Retrying package installation ($i/3)..."
     sleep 5
 done
+
 
 
 #------------------------------------------------------------------------------
