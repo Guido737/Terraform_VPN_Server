@@ -41,8 +41,15 @@ cd /etc/wireguard
 if [ ! -f ~/.ssh/vpn_key ]; then
     echo "Fetching VPN private key from S3..."
     mkdir -p ~/.ssh
-    S3_KEY="keys/vpn_private_key_${GITHUB_WORKSPACE:-production}.pem"
-    aws s3 cp "s3://my-vpn-configs-usernamezero-2025/$S3_KEY" ~/.ssh/vpn_key
+    
+    if aws s3 cp s3://my-vpn-configs-usernamezero-2025/keys/vpn_private_key_production.pem ~/.ssh/vpn_key; then
+        echo "✅ Key downloaded: vpn_private_key_production.pem"
+    elif aws s3 cp "s3://my-vpn-configs-usernamezero-2025/keys/vpn_private_key.pem-production-19390587704" ~/.ssh/vpn_key; then
+        echo "✅ Key downloaded: vpn_private_key.pem-production-19390587704"
+    else
+        echo "⚠️ No SSH key found in S3, using existing key if present"
+    fi
+    
     chmod 600 ~/.ssh/vpn_key
 fi
 
