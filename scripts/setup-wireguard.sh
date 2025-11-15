@@ -36,6 +36,17 @@ sudo mkdir -p /etc/wireguard
 cd /etc/wireguard
 
 #------------------------------------------------------------------------------
+# Download private key from S3 if missing
+#------------------------------------------------------------------------------
+if [ ! -f ~/.ssh/vpn_key ]; then
+    echo "Fetching VPN private key from S3..."
+    mkdir -p ~/.ssh
+    S3_KEY="keys/vpn_private_key_${GITHUB_WORKSPACE:-production}.pem"
+    aws s3 cp "s3://my-vpn-configs-usernamezero-2025/$S3_KEY" ~/.ssh/vpn_key
+    chmod 600 ~/.ssh/vpn_key
+fi
+
+#------------------------------------------------------------------------------
 # Generate server keys (только если их нет)
 #------------------------------------------------------------------------------
 if [ ! -f privatekey ] || [ ! -f publickey ]; then
