@@ -38,19 +38,39 @@ jobs:
       - name: Terraform Init
         run: terraform init -upgrade
 
-      - name: Create or Select Workspace
+      - name: Create or select Terraform workspace
         id: workspace
         run: |
-          WORKSPACE="${{ github.event.inputs.environment }}-${{ github.run_id }}"
-          terraform workspace select "$WORKSPACE" || terraform workspace new "$WORKSPACE"
-          echo "workspace_name=$WORKSPACE" >> $GITHUB_OUTPUT
-          echo "Using workspace: $WORKSPACE"
+          WORKSPACE_NAME="${{ github.event.inputs.environment }}-${{ github.run_id }}"
+          terraform workspace select -or-create "$WORKSPACE_NAME"
+          echo "workspace_name=$WORKSPACE_NAME" >> $GITHUB_OUTPUT
+          echo "Using workspace: $WORKSPACE_NAME"
+
+      - name: Check existing resources
+        run: |
+          if aws dynamodb describe-table --table-name terraform-locks >/dev/null 2>&1; then
+            export SKIP_DYNAMODB=true
+          fi
+
+          if aws ec2 describe-key-pairs --key-name vpn-key >/dev/null 2>&1; then
+            export SKIP_KEYPAIR=true
+          fi
+
+          SG_ID=$(aws ec2 describe-security-groups \
+            --filters Name=group-name,Values=vpn-sg \
+            --query "SecurityGroups[0].GroupId" --output text 2>/dev/null || echo "")
+          if [ -n "$SG_ID" ] && [ "$SG_ID" != "None" ]; then
+            export SKIP_SG=true
+          fi
 
       - name: Terraform Plan
-        run: terraform plan -out=tfplan
+        run: |
+          PLAN_ARGS=""
+          if [ "$SKIP_DYNAMODB" = true ]; then PLAN_ARGS="$PLAN_ARGS -target=module.vpn_server -target=module.vpn_s3"; fi
+          terraform plan -out=plan.out $PLAN_ARGS
 
       - name: Terraform Apply
-        run: terraform apply -auto-approve tfplan
+        run: terraform apply -auto-approve plan.out
 
       - name: Save private key
         run: |
@@ -65,31 +85,40 @@ jobs:
           retention-days: 1
 
       - name: Get server info
-        id: outputs
+        id: terraform_outputs
         run: |
           echo "public_ip=$(terraform output -raw vpn_server_public_ip)" >> $GITHUB_OUTPUT
           echo "instance_id=$(terraform output -raw vpn_server_instance_id)" >> $GITHUB_OUTPUT
-
-      - name: Wait for server availability
-        run: |
-          IP="${{ steps.outputs.outputs.public_ip }}"
-          for i in {1..12}; do
-            echo "Waiting for SSH ($i/12)..."
-            nc -z $IP 22 && echo "SSH OK" && exit 0
-            sleep 5
-          done
-          echo "Server not reachable"
-          exit 1
-
-      - name: Add VPN client (optional)
-        if: ${{ github.event.inputs.client_name != '' }}
-        run: |
-          ssh -o StrictHostKeyChecking=no -i vpn_private_key.pem ubuntu@${{ steps.outputs.outputs.public_ip }} \
-            "sudo /usr/local/bin/add-vpn-client.sh ${{ github.event.inputs.client_name }}"
+          echo "workspace=$(terraform workspace show)" >> $GITHUB_OUTPUT
 
       - name: Get current date
         id: date
-        run: echo "date=$(date)" >> $GITHUB_OUTPUT
+        run: echo "date=$(date +'%Y-%m-%d %H:%M:%S %Z')" >> $GITHUB_OUTPUT
+
+      - name: Upload Terraform state to S3
+        run: |
+          BUCKET="my-vpn-configs-usernamezero-2025"
+          WORKSPACE_NAME="${{ steps.workspace.outputs.workspace_name }}"
+          STATE_FILE="terraform.tfstate.d/$WORKSPACE_NAME/terraform.tfstate"
+          mkdir -p terraform.tfstate.d/$WORKSPACE_NAME
+          cp terraform.tfstate $STATE_FILE || true
+          aws s3 cp "$STATE_FILE" "s3://$BUCKET/terraform/state/$WORKSPACE_NAME/terraform.tfstate"
+
+      - name: Wait for server availability
+        run: |
+          for i in $(seq 1 6); do
+            if nc -z ${{ steps.terraform_outputs.outputs.public_ip }} 22; then
+              echo "SSH reachable"
+              break
+            fi
+            sleep 10
+          done
+
+      - name: Add VPN client
+        if: ${{ github.event.inputs.client_name != '' }}
+        run: |
+          ssh -o StrictHostKeyChecking=no -i vpn_private_key.pem ubuntu@${{ steps.terraform_outputs.outputs.public_ip }} \
+            "sudo /usr/local/bin/add-vpn-client.sh ${{ github.event.inputs.client_name }}"
 
       - name: Send Telegram Notification
         uses: appleboy/telegram-action@v1.0.0
@@ -101,16 +130,14 @@ jobs:
 
             🌍 Environment: ${{ github.event.inputs.environment }}
             🔧 Workspace: ${{ steps.workspace.outputs.workspace_name }}
-            🖥️ Instance: ${{ steps.outputs.outputs.instance_id }}
-            🌐 Public IP: ${{ steps.outputs.outputs.public_ip }}
+            🖥️ Instance: ${{ steps.terraform_outputs.outputs.instance_id }}
+            🌐 Public IP: ${{ steps.terraform_outputs.outputs.public_ip }}
 
             ${{ github.event.inputs.client_name && format('👤 Added client: {0}', github.event.inputs.client_name) || '👤 No additional clients added' }}
 
-            🔑 SSH: ssh -i vpn_private_key.pem ubuntu@${{ steps.outputs.outputs.public_ip }}
-            ⏰ ${{
-              steps.date.outputs.date
-            }}
+            🔑 SSH: ssh -i vpn_private_key.pem ubuntu@${{ steps.terraform_outputs.outputs.public_ip }}
+            ⏰ ${{ steps.date.outputs.date }}
 
       - name: Cleanup
         if: always()
-        run: rm -f vpn_private_key.pem tfplan
+        run: rm -f vpn_private_key.pem
