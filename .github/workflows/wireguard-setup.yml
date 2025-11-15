@@ -24,7 +24,7 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: us-east-1
 
-      - name: Upload and run WireGuard scripts
+      - name: Upload and run setup-wireguard.sh
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
@@ -36,29 +36,26 @@ jobs:
           fi
 
           mkdir -p ~/.ssh
-
+          
           # Download SSH key from S3
           echo "Downloading SSH key from S3..."
-          if ! aws s3 cp s3://my-vpn-configs-usernamezero-2025/keys/vpn_private_key_production.pem ~/.ssh/vpn_key; then
-            echo "❌ ERROR: Failed to download SSH key from S3"
-            exit 1
-          fi
+          aws s3 cp s3://my-vpn-configs-usernamezero-2025/keys/vpn_private_key_production.pem ~/.ssh/vpn_key
           chmod 600 ~/.ssh/vpn_key
 
           # Wait until SSH is ready
           echo "Waiting for server to be ready..."
-          until ssh -i ~/.ssh/vpn_key -o ConnectTimeout=5 -o StrictHostKeyChecking=no ubuntu@$SERVER_IP "echo ready" >/dev/null 2>&1; do
+          until ssh -i ~/.ssh/vpn_key -o StrictHostKeyChecking=no ubuntu@$SERVER_IP "echo ready" >/dev/null 2>&1; do
             echo "Waiting for SSH..."
             sleep 5
           done
 
-          # Upload scripts using correct key
-          echo "Uploading scripts to server..."
-          scp -i ~/.ssh/vpn_key -o StrictHostKeyChecking=no -r ./scripts ubuntu@$SERVER_IP:/tmp/wg-scripts
+          # Upload setup-wireguard.sh
+          echo "Uploading setup-wireguard.sh to server..."
+          scp -i ~/.ssh/vpn_key -o StrictHostKeyChecking=no ./scripts/setup-wireguard.sh ubuntu@$SERVER_IP:/tmp/setup-wireguard.sh
 
-          # Run setup-wireguard.sh on server
+          # Run the script
           echo "Running setup-wireguard.sh on server..."
-          ssh -i ~/.ssh/vpn_key -o StrictHostKeyChecking=no ubuntu@$SERVER_IP "sudo bash /tmp/wg-scripts/setup-wireguard.sh"
+          ssh -i ~/.ssh/vpn_key -o StrictHostKeyChecking=no ubuntu@$SERVER_IP "sudo bash /tmp/setup-wireguard.sh"
 
       - name: Telegram notification
         uses: appleboy/telegram-action@master
