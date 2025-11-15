@@ -66,6 +66,11 @@ jobs:
           echo "Uploading scripts to server..."
           scp -r ./wg-scripts ubuntu@$SERVER_IP:/tmp/
 
+          # Run wg-create-manual.sh to generate server keys if missing
+          echo "Running wg-create-manual.sh on server..."
+          ssh ubuntu@$SERVER_IP "sudo bash /tmp/wg-scripts/wg-create-manual.sh"
+
+          # Now run wg-sync-configs.sh
           echo "Running wg-sync-configs.sh on server..."
           ssh ubuntu@$SERVER_IP "sudo bash /tmp/wg-scripts/wg-sync-configs.sh"
 
