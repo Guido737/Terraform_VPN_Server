@@ -10,6 +10,13 @@ if [ "$EUID" -ne 0 ]; then
   exit 1
 fi
 
+#------------------------------------------------------------------------------
+# Ensure no apt locks and fix dpkg
+#------------------------------------------------------------------------------
+sudo killall apt apt-get || true
+sudo rm -f /var/lib/dpkg/lock-frontend /var/lib/dpkg/lock
+sudo dpkg --configure -a
+
 echo "Starting WireGuard setup..."
 
 #------------------------------------------------------------------------------
