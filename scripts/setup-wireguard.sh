@@ -24,21 +24,29 @@ echo "Starting WireGuard setup..."
 #------------------------------------------------------------------------------
 echo "Updating packages and installing dependencies..."
 export DEBIAN_FRONTEND=noninteractive
+
 for i in {1..3}; do
+    sudo rm -f /var/lib/dpkg/lock-frontend /var/cache/debconf/config.dat
+    sudo dpkg --configure -a
+    echo iptables-persistent iptables-persistent/autosave_v4 boolean true | sudo debconf-set-selections
+    echo iptables-persistent iptables-persistent/autosave_v6 boolean true | sudo debconf-set-selections
+    
     if sudo apt-get update -y && \
-       echo iptables-persistent iptables-persistent/autosave_v4 boolean true | sudo debconf-set-selections && \
-       echo iptables-persistent iptables-persistent/autosave_v6 boolean true | sudo debconf-set-selections && \
-       sudo apt-get install -y wireguard qrencode iptables-persistent awscli; then
+       sudo apt-get install -y wireguard qrencode awscli iptables-persistent; then
         echo "Packages installed successfully"
         break
     fi
+
     if [ $i -eq 3 ]; then
-        echo "ERROR: Failed to install packages after 3 attempts"
-        exit 1
+        echo "ERROR: Failed to install packages after 3 attempts, skipping iptables-persistent"
+        sudo apt-get install -y --no-install-recommends iptables-persistent || echo "⚠️ iptables-persistent installation skipped"
+        break
     fi
+
     echo "Retrying package installation ($i/3)..."
     sleep 5
 done
+
 
 #------------------------------------------------------------------------------
 # Create WireGuard directory
