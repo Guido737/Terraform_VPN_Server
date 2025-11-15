@@ -19,7 +19,7 @@ resource "tls_private_key" "vpn_key" {
 }
 
 resource "aws_key_pair" "vpn_key" {
-  key_name   = var.key_pair_name
+  key_name   = "${var.key_pair_name}-${terraform.workspace}"
   public_key = tls_private_key.vpn_key.public_key_openssh
 }
 
@@ -28,7 +28,7 @@ resource "aws_key_pair" "vpn_key" {
 #---------------------------------------------------------------------------------------
 resource "local_sensitive_file" "private_key" {
   content         = tls_private_key.vpn_key.private_key_pem
-  filename        = "${path.module}/../../../vpn_private_key.pem"
+  filename        = "${path.module}/../../../vpn_private_key_${terraform.workspace}.pem"
   file_permission = "0600"
 }
 
@@ -36,12 +36,9 @@ resource "local_sensitive_file" "private_key" {
 # Security group for VPN
 #---------------------------------------------------------------------------------------
 resource "aws_security_group" "vpn_sg" {
-  name        = "vpn-sg"
+  name        = "${var.security_group_name}-${terraform.workspace}"
   description = "Allow SSH and WireGuard"
 
-  #---------------------------------------------------------------------------------------
-  # SSH access
-  #---------------------------------------------------------------------------------------
   ingress {
     description = "SSH"
     from_port   = 22
@@ -50,9 +47,6 @@ resource "aws_security_group" "vpn_sg" {
     cidr_blocks = ["0.0.0.0/0"]
   }
 
-  #---------------------------------------------------------------------------------------
-  # WireGuard UDP access
-  #---------------------------------------------------------------------------------------
   ingress {
     description = "WireGuard UDP"
     from_port   = 51820
@@ -61,9 +55,6 @@ resource "aws_security_group" "vpn_sg" {
     cidr_blocks = ["0.0.0.0/0"]
   }
 
-  #---------------------------------------------------------------------------------------
-  # All outbound traffic
-  #---------------------------------------------------------------------------------------
   egress {
     from_port   = 0
     to_port     = 0
@@ -82,7 +73,7 @@ resource "aws_instance" "vpn_server" {
   vpc_security_group_ids = [aws_security_group.vpn_sg.id]
 
   tags = {
-    Name = "Terraform-VPN-Server"
+    Name = "Terraform-VPN-Server-${terraform.workspace}"
   }
 }
 
@@ -98,4 +89,3 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "vpn_configs_encry
     }
   }
 }
-#---------------------------------------------------------------------------------------
