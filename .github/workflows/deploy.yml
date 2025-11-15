@@ -36,44 +36,21 @@ jobs:
           aws-region: us-east-1
 
       - name: Terraform Init
-        run: |
-          terraform init -upgrade
-          terraform validate || true
+        run: terraform init -upgrade
 
-      - name: Create or select Terraform workspace
+      - name: Create or Select Workspace
         id: workspace
         run: |
-          WORKSPACE_NAME="${{ github.event.inputs.environment }}-${{ github.run_id }}"
-          terraform workspace select "$WORKSPACE_NAME" || terraform workspace new "$WORKSPACE_NAME"
-          echo "workspace_name=$WORKSPACE_NAME" >> $GITHUB_OUTPUT
-          echo "Using workspace: $WORKSPACE_NAME"
-
-      - name: Import DynamoDB Lock Table (if exists)
-        run: |
-          if aws dynamodb describe-table --table-name terraform-locks >/dev/null 2>&1; then
-            terraform import -no-color module.terraform_lock.aws_dynamodb_table.terraform_lock terraform-locks || true
-          fi
-
-      - name: Import existing AWS resources to prevent conflicts
-        run: |
-          # Import Key Pair if exists
-          if aws ec2 describe-key-pairs --key-name vpn-key >/dev/null 2>&1; then
-            terraform import -no-color module.vpn_server.aws_key_pair.vpn_key vpn-key || true
-          fi
-          
-          # Import Security Group if exists
-          SG_ID=$(aws ec2 describe-security-groups \
-            --filters Name=group-name,Values=vpn-sg \
-            --query "SecurityGroups[0].GroupId" --output text 2>/dev/null || echo "")
-          if [ -n "$SG_ID" ] && [ "$SG_ID" != "None" ]; then
-            terraform import -no-color module.vpn_server.aws_security_group.vpn_sg "$SG_ID" || true
-          fi
+          WORKSPACE="${{ github.event.inputs.environment }}-${{ github.run_id }}"
+          terraform workspace select "$WORKSPACE" || terraform workspace new "$WORKSPACE"
+          echo "workspace_name=$WORKSPACE" >> $GITHUB_OUTPUT
+          echo "Using workspace: $WORKSPACE"
 
       - name: Terraform Plan
-        run: terraform plan -out=plan.out
+        run: terraform plan -out=tfplan
 
       - name: Terraform Apply
-        run: terraform apply -auto-approve plan.out
+        run: terraform apply -auto-approve tfplan
 
       - name: Save private key
         run: |
@@ -88,103 +65,52 @@ jobs:
           retention-days: 1
 
       - name: Get server info
-        id: terraform_outputs
+        id: outputs
         run: |
           echo "public_ip=$(terraform output -raw vpn_server_public_ip)" >> $GITHUB_OUTPUT
           echo "instance_id=$(terraform output -raw vpn_server_instance_id)" >> $GITHUB_OUTPUT
-          echo "workspace=$(terraform workspace show)" >> $GITHUB_OUTPUT
-
-      - name: Upload Terraform state to S3
-        run: |
-          BUCKET="my-vpn-configs-usernamezero-2025"
-          WORKSPACE_NAME="${{ steps.workspace.outputs.workspace_name }}"
-          
-          echo "Searching for Terraform state file..."
-          
-          # Ищем state файл в разных возможных местах
-          if [ -f "terraform.tfstate" ]; then
-            STATE_FILE="terraform.tfstate"
-            echo "Found state file: $STATE_FILE"
-          elif [ -d "terraform.tfstate.d" ]; then
-            # Ищем в директории workspace
-            if [ -f "terraform.tfstate.d/$WORKSPACE_NAME/terraform.tfstate" ]; then
-              STATE_FILE="terraform.tfstate.d/$WORKSPACE_NAME/terraform.tfstate"
-              echo "Found state file in workspace directory: $STATE_FILE"
-            else
-              # Берем первый найденный state файл в директории
-              FIRST_STATE=$(find terraform.tfstate.d -name "terraform.tfstate" -type f | head -1)
-              if [ -n "$FIRST_STATE" ]; then
-                STATE_FILE="$FIRST_STATE"
-                echo "Found state file: $STATE_FILE"
-              else
-                echo "ERROR: No Terraform state file found in terraform.tfstate.d"
-                echo "Available files in terraform.tfstate.d:"
-                find terraform.tfstate.d -type f 2>/dev/null || echo "No files found"
-                exit 1
-              fi
-            fi
-          else
-            echo "ERROR: No Terraform state file or directory found"
-            echo "Current directory contents:"
-            ls -la
-            exit 1
-          fi
-          
-          # Создаем директорию в S3
-          echo "Creating S3 directory structure..."
-          aws s3api put-object --bucket "$BUCKET" --key "terraform/state/$WORKSPACE_NAME/" --content-length 0 >/dev/null 2>&1 || true
-          
-          # Загружаем state файл
-          echo "Uploading state file to S3..."
-          aws s3 cp "$STATE_FILE" "s3://$BUCKET/terraform/state/$WORKSPACE_NAME/terraform.tfstate"
-          
-          echo "✅ State uploaded successfully to: s3://$BUCKET/terraform/state/$WORKSPACE_NAME/terraform.tfstate"
 
       - name: Wait for server availability
         run: |
-          for i in $(seq 1 6); do
-            echo "Waiting for server (attempt $i)..."
-            if nc -z ${{ steps.terraform_outputs.outputs.public_ip }} 22; then
-              echo "SSH reachable"
-              break
-            fi
-            sleep 10
+          IP="${{ steps.outputs.outputs.public_ip }}"
+          for i in {1..12}; do
+            echo "Waiting for SSH ($i/12)..."
+            nc -z $IP 22 && echo "SSH OK" && exit 0
+            sleep 5
           done
+          echo "Server not reachable"
+          exit 1
 
-      - name: Add VPN client
+      - name: Add VPN client (optional)
         if: ${{ github.event.inputs.client_name != '' }}
         run: |
-          ssh -o StrictHostKeyChecking=no -i vpn_private_key.pem ubuntu@${{ steps.terraform_outputs.outputs.public_ip }} \
+          ssh -o StrictHostKeyChecking=no -i vpn_private_key.pem ubuntu@${{ steps.outputs.outputs.public_ip }} \
             "sudo /usr/local/bin/add-vpn-client.sh ${{ github.event.inputs.client_name }}"
 
       - name: Get current date
         id: date
-        run: echo "date=$(date +'%Y-%m-%d %H:%M:%S %Z')" >> $GITHUB_OUTPUT
+        run: echo "date=$(date)" >> $GITHUB_OUTPUT
 
-      - name: Send deployment notification
+      - name: Send Telegram Notification
         uses: appleboy/telegram-action@v1.0.0
         with:
           to: ${{ secrets.TELEGRAM_CHAT_ID }}
           token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           message: |
-            🚀 NEW VPN Server Deployed Successfully!
+            🚀 VPN Server Deployed Successfully
 
-            📊 Deployment Info:
-            • Environment: ${{ github.event.inputs.environment }}
-            • Workspace: ${{ steps.workspace.outputs.workspace_name }}
-            • Instance: ${{ steps.terraform_outputs.outputs.instance_id }}
-            • Public IP: ${{ steps.terraform_outputs.outputs.public_ip }}
-            • Region: us-east-1
+            🌍 Environment: ${{ github.event.inputs.environment }}
+            🔧 Workspace: ${{ steps.workspace.outputs.workspace_name }}
+            🖥️ Instance: ${{ steps.outputs.outputs.instance_id }}
+            🌐 Public IP: ${{ steps.outputs.outputs.public_ip }}
 
-            ✅ New parallel instance created
-            ✅ Existing servers unaffected
-            ✅ Safe for multiple deployments
+            ${{ github.event.inputs.client_name && format('👤 Added client: {0}', github.event.inputs.client_name) || '👤 No additional clients added' }}
 
-            ${{ github.event.inputs.client_name && format('• Client Added: {0}', github.event.inputs.client_name) || '• No clients added' }}
-
-            🔑 SSH: ssh -i vpn_private_key.pem ubuntu@${{ steps.terraform_outputs.outputs.public_ip }}
-            ⏰ Time: ${{ steps.date.outputs.date }}
+            🔑 SSH: ssh -i vpn_private_key.pem ubuntu@${{ steps.outputs.outputs.public_ip }}
+            ⏰ ${{
+              steps.date.outputs.date
+            }}
 
       - name: Cleanup
         if: always()
-        run: rm -f vpn_private_key.pem
+        run: rm -f vpn_private_key.pem tfplan
