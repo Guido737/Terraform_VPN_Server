@@ -54,14 +54,27 @@ sudo mkdir -p /etc/wireguard
 cd /etc/wireguard
 
 #------------------------------------------------------------------------------
-# Ensure VPN private key exists (already uploaded via GitHub Actions)
+# Download private key from S3 if missing
 #------------------------------------------------------------------------------
-if [ ! -f /home/ubuntu/.ssh/vpn_key ]; then
-    echo "ERROR: VPN private key not found at /home/ubuntu/.ssh/vpn_key"
-    exit 1
+SSH_KEY="/home/ubuntu/.ssh/vpn_key"
+
+if [ ! -f "$SSH_KEY" ]; then
+    echo "Fetching VPN private key from S3..."
+    mkdir -p /home/ubuntu/.ssh
+
+    if aws s3 cp s3://my-vpn-configs-usernamezero-2025/keys/vpn_private_key_production.pem "$SSH_KEY"; then
+        echo "✅ Key downloaded: vpn_private_key_production.pem"
+    elif aws s3 cp "s3://my-vpn-configs-usernamezero-2025/keys/vpn_private_key.pem-production-19390587704" "$SSH_KEY"; then
+        echo "✅ Key downloaded: vpn_private_key.pem-production-19390587704"
+    else
+        echo "⚠️ No SSH key found in S3, exiting"
+        exit 1
+    fi
+
+    chown ubuntu:ubuntu "$SSH_KEY"
+    chmod 600 "$SSH_KEY"
+    echo "✅ VPN private key is ready"
 fi
-chmod 600 /home/ubuntu/.ssh/vpn_key
-echo "✅ VPN private key is ready"
 
 #------------------------------------------------------------------------------
 # Generate server keys
