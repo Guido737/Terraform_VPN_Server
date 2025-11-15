@@ -13,14 +13,14 @@ data "aws_ami" "ubuntu" {
 #---------------------------------------------------------------------------------------
 # Key pair for VPN server
 #---------------------------------------------------------------------------------------
-resource "tls_private_key" "vpn_key" {
-  algorithm = "RSA"
-  rsa_bits  = 4096
-}
-
 resource "aws_key_pair" "vpn_key" {
   key_name   = "${var.key_pair_name}-${terraform.workspace}"
   public_key = tls_private_key.vpn_key.public_key_openssh
+
+  lifecycle {
+    create_before_destroy = true
+    ignore_changes        = [public_key]
+  }
 }
 
 #---------------------------------------------------------------------------------------
@@ -60,6 +60,10 @@ resource "aws_security_group" "vpn_sg" {
     to_port     = 0
     protocol    = "-1"
     cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  lifecycle {
+    create_before_destroy = true
   }
 }
 
