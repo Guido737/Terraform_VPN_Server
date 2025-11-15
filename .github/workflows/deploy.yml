@@ -52,17 +52,18 @@ jobs:
       - name: Terraform Apply
         run: terraform apply -auto-approve tfplan
 
-      - name: Save private key
+      - name: Save private key locally
         run: |
           terraform output -raw private_key > vpn_private_key.pem
           chmod 600 vpn_private_key.pem
 
-      - name: Upload private key artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: vpn-private-key-${{ github.run_id }}
-          path: vpn_private_key.pem
-          retention-days: 1
+      - name: Upload private key to S3
+        run: |
+          aws s3 cp vpn_private_key.pem s3://my-vpn-configs-usernamezero-2025/keys/vpn_private_key_${{ github.event.inputs.environment }}.pem --sse AES256
+          echo "✅ Private key uploaded to S3 securely"
+
+      - name: Remove local private key
+        run: rm -f vpn_private_key.pem
 
       - name: Get server outputs
         id: outputs
@@ -89,9 +90,5 @@ jobs:
 
             ${{ github.event.inputs.client_name && format('👤 Added client: {0}', github.event.inputs.client_name) || '👤 No additional clients added' }}
 
-            🔑 SSH: ssh -i vpn_private_key.pem ubuntu@${{ steps.outputs.outputs.public_ip }}
+            🔑 Private key stored in S3 securely (accessible only via IAM)
             ⏰ ${{ steps.date.outputs.date }}
-
-      - name: Cleanup
-        if: always()
-        run: rm -f vpn_private_key.pem
