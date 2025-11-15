@@ -24,7 +24,7 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: us-east-1
 
-      - name: Upload and run WireGuard scripts
+            - name: Upload and run WireGuard scripts
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
@@ -45,12 +45,11 @@ jobs:
           fi
           chmod 600 ~/.ssh/vpn_key
 
-          cat > ~/.ssh/config << EOF
-Host $SERVER_IP
-  StrictHostKeyChecking no
-  UserKnownHostsFile /dev/null
-  IdentityFile ~/.ssh/vpn_key
-EOF
+          # Create SSH config
+          echo "Host $SERVER_IP" > ~/.ssh/config
+          echo "  StrictHostKeyChecking no" >> ~/.ssh/config
+          echo "  UserKnownHostsFile /dev/null" >> ~/.ssh/config
+          echo "  IdentityFile ~/.ssh/vpn_key" >> ~/.ssh/config
 
           # Wait until SSH is ready
           echo "Waiting for server to be ready..."
