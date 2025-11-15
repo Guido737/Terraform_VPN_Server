@@ -16,8 +16,9 @@ echo "Starting WireGuard setup..."
 # Install required packages with retry
 #------------------------------------------------------------------------------
 echo "Updating packages and installing dependencies..."
+export DEBIAN_FRONTEND=noninteractive   # <- добавлено
 for i in {1..3}; do
-    if sudo apt update && sudo apt install -y wireguard qrencode iptables-persistent awscli; then
+    if sudo apt-get update -y && sudo apt-get install -y wireguard qrencode iptables-persistent awscli; then
         echo "Packages installed successfully"
         break
     fi
