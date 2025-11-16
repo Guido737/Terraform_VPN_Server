@@ -13,52 +13,29 @@ fi
 #------------------------------------------------------------------------------
 # Ensure no apt locks and fix dpkg
 #------------------------------------------------------------------------------
-sudo killall apt apt-get || true
-sudo rm -f /var/lib/dpkg/lock-frontend /var/lib/dpkg/lock
-sudo dpkg --configure -a
+killall apt apt-get || true
+rm -f /var/lib/dpkg/lock-frontend /var/lib/dpkg/lock
+dpkg --configure -a
 
 echo "Starting WireGuard setup..."
 
 #------------------------------------------------------------------------------
-# Non-interactive apt + preseed iptables-persistent answers
+# Save empty iptables rules to prevent iptables-persistent prompts
 #------------------------------------------------------------------------------
-export DEBIAN_FRONTEND=noninteractive
-#------------------------------------------------------------------------------
-# Preseed iptables-persistent to avoid prompts
-#------------------------------------------------------------------------------
-echo "iptables-persistent iptables-persistent/autosave_v4 boolean true" | sudo debconf-set-selections
-echo "iptables-persistent iptables-persistent/autosave_v6 boolean true" | sudo debconf-set-selections
-
-#------------------------------------------------------------------------------
-# Ensure no apt locks and fix dpkg
-#------------------------------------------------------------------------------
-sudo killall apt apt-get || true
-sudo rm -f /var/lib/dpkg/lock-frontend /var/lib/dpkg/lock /var/cache/debconf/config.dat
-sudo dpkg --configure -a || true
-
-#------------------------------------------------------------------------------
-# Non-interactive apt + preseed iptables-persistent answers
-#------------------------------------------------------------------------------
-export DEBIAN_FRONTEND=noninteractive
-echo "iptables-persistent iptables-persistent/autosave_v4 boolean true" | sudo debconf-set-selections
-echo "iptables-persistent iptables-persistent/autosave_v6 boolean true" | sudo debconf-set-selections
-
-# Save empty rules to prevent prompts
-sudo mkdir -p /etc/iptables
-sudo touch /etc/iptables/rules.v4 /etc/iptables/rules.v6
-sudo chmod 644 /etc/iptables/rules.v4 /etc/iptables/rules.v6
+mkdir -p /etc/iptables
+touch /etc/iptables/rules.v4 /etc/iptables/rules.v6
+chmod 644 /etc/iptables/rules.v4 /etc/iptables/rules.v6
 
 #------------------------------------------------------------------------------
 # Install packages with retry
 #------------------------------------------------------------------------------
-
+echo "Updating packages and installing dependencies..."
 for i in {1..3}; do
-    sudo killall apt apt-get || true
-    sudo rm -f /var/lib/dpkg/lock-frontend /var/lib/dpkg/lock /var/cache/debconf/config.dat
-    sudo dpkg --configure -a || true
+    rm -f /var/lib/dpkg/lock-frontend /var/cache/debconf/config.dat
+    dpkg --configure -a || true
 
-    if sudo apt-get update -y && \
-       sudo apt-get install -y --no-install-recommends \
+    if DEBIAN_FRONTEND=noninteractive apt-get update -y && \
+       DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
            wireguard wireguard-tools qrencode awscli iptables-persistent \
            -o Dpkg::Options::="--force-confdef" \
            -o Dpkg::Options::="--force-confold"; then
@@ -66,59 +43,28 @@ for i in {1..3}; do
         break
     fi
 
-    if [ $i -eq 3 ]; then
-        echo "⚠️ Failed to install iptables-persistent after 3 attempts, skipping it"
-        sudo apt-get install -y --no-install-recommends iptables-persistent || echo "⚠️ Skipped"
-        break
-    fi
-
     echo "Retrying package installation ($i/3)..."
     sleep 5
 done
 
-
 #------------------------------------------------------------------------------
 # Create WireGuard directory
 #------------------------------------------------------------------------------
-sudo mkdir -p /etc/wireguard
+mkdir -p /etc/wireguard
 cd /etc/wireguard
-
-# #------------------------------------------------------------------------------
-# # Download private key from S3 if missing
-# #------------------------------------------------------------------------------
-# SSH_KEY="/home/ubuntu/.ssh/vpn_key"
-
-# if [ ! -f "$SSH_KEY" ]; then
-#     echo "Fetching VPN private key from S3..."
-#     mkdir -p /home/ubuntu/.ssh
-
-#     if aws s3 cp s3://my-vpn-configs-usernamezero-2025/keys/vpn_private_key_production.pem "$SSH_KEY"; then
-#         echo "✅ Key downloaded: vpn_private_key_production.pem"
-#     elif aws s3 cp "s3://my-vpn-configs-usernamezero-2025/keys/vpn_private_key.pem-production-19390587704" "$SSH_KEY"; then
-#         echo "✅ Key downloaded: vpn_private_key.pem-production-19390587704"
-#     else
-#         echo "⚠️ No SSH key found in S3, exiting"
-#         exit 1
-#     fi
-
-#     chown ubuntu:ubuntu "$SSH_KEY"
-#     chmod 600 "$SSH_KEY"
-#     echo "✅ VPN private key is ready"
-# fi
 
 #------------------------------------------------------------------------------
 # Generate server keys
 #------------------------------------------------------------------------------
 if [ ! -f privatekey ] || [ ! -f publickey ]; then
     echo "Generating server keys..."
-    sudo wg genkey | sudo tee privatekey | sudo wg pubkey | sudo tee publickey
-    sudo chmod 600 privatekey
-    sudo chmod 644 publickey
+    wg genkey | tee privatekey | wg pubkey | tee publickey
+    chmod 600 privatekey
+    chmod 644 publickey
     echo "Server keys generated successfully"
 else
     echo "Server keys already exist, skipping generation"
 fi
-
 
 #------------------------------------------------------------------------------
 # Configure AWS CLI
@@ -131,7 +77,6 @@ region = us-east-1
 output = json
 EOL
 
-# Validate that AWS credentials are provided
 if [ -z "$AWS_ACCESS_KEY_ID" ] || [ -z "$AWS_SECRET_ACCESS_KEY" ]; then
     echo "ERROR: AWS credentials not provided in environment variables"
     exit 1
@@ -144,7 +89,6 @@ aws_secret_access_key = ${AWS_SECRET_ACCESS_KEY}
 EOL
 
 chmod 600 ~/.aws/credentials
-echo "AWS CLI configured"
 
 # Test AWS CLI configuration
 if aws sts get-caller-identity > /dev/null 2>&1; then
@@ -157,8 +101,8 @@ fi
 #------------------------------------------------------------------------------
 # Create VPN scripts directory
 #------------------------------------------------------------------------------
-sudo mkdir -p /home/ubuntu/vpn-scripts
-sudo chown ubuntu:ubuntu /home/ubuntu/vpn-scripts
+mkdir -p /home/ubuntu/vpn-scripts
+chown ubuntu:ubuntu /home/ubuntu/vpn-scripts
 echo "Created VPN scripts directory"
 
 #------------------------------------------------------------------------------
@@ -170,16 +114,12 @@ for i in {1..3}; do
         echo "Scripts downloaded successfully"
         break
     fi
-    if [ $i -eq 3 ]; then
-        echo "WARNING: Failed to download scripts from S3 after 3 attempts"
-        break
-    fi
     echo "Retrying S3 download ($i/3)..."
     sleep 5
 done
 
 if ls /home/ubuntu/vpn-scripts/*.sh >/dev/null 2>&1; then
-    sudo chmod +x /home/ubuntu/vpn-scripts/*.sh
+    chmod +x /home/ubuntu/vpn-scripts/*.sh
     echo "Scripts made executable"
 fi
 
@@ -190,20 +130,17 @@ WG_CONF="/etc/wireguard/wg0.conf"
 
 if [ -f "/home/ubuntu/vpn-scripts/wg-sync-configs.sh" ]; then
     echo "Running initial configuration sync..."
-    sudo /home/ubuntu/vpn-scripts/wg-sync-configs.sh
+    /home/ubuntu/vpn-scripts/wg-sync-configs.sh
 elif [ ! -f "$WG_CONF" ]; then
     echo "wg-sync-configs.sh not found, auto-generating basic wg0.conf..."
-    PRIVATE_KEY=$(sudo cat privatekey 2>/dev/null || echo "")
+    PRIVATE_KEY=$(cat privatekey 2>/dev/null || echo "")
     if [ -z "$PRIVATE_KEY" ]; then
         echo "ERROR: Cannot read private key for auto-config"
         exit 1
     fi
     
-    # Detect network interface for iptables rules
     DEFAULT_INTERFACE=$(ip route | grep default | awk '{print $5}' | head -1)
-    if [ -z "$DEFAULT_INTERFACE" ]; then
-        DEFAULT_INTERFACE="eth0"
-    fi
+    [ -z "$DEFAULT_INTERFACE" ] && DEFAULT_INTERFACE="eth0"
     
     cat > "$WG_CONF" << EOL
 [Interface]
@@ -214,7 +151,7 @@ SaveConfig = true
 PostUp = iptables -A FORWARD -i wg0 -j ACCEPT; iptables -t nat -A POSTROUTING -o $DEFAULT_INTERFACE -j MASQUERADE
 PostDown = iptables -D FORWARD -i wg0 -j ACCEPT; iptables -t nat -D POSTROUTING -o $DEFAULT_INTERFACE -j MASQUERADE
 EOL
-    sudo chmod 600 "$WG_CONF"
+    chmod 600 "$WG_CONF"
     echo "Basic wg0.conf generated with interface: $DEFAULT_INTERFACE"
 else
     echo "WireGuard config already exists"
@@ -224,19 +161,16 @@ fi
 # Enable IP forwarding
 #------------------------------------------------------------------------------
 echo "Enabling IP forwarding..."
-if ! grep -q "net.ipv4.ip_forward=1" /etc/sysctl.conf; then
-    echo "net.ipv4.ip_forward=1" | sudo tee -a /etc/sysctl.conf
-    echo "IP forwarding added to sysctl.conf"
-fi
-sudo sysctl -p
+grep -q "net.ipv4.ip_forward=1" /etc/sysctl.conf || echo "net.ipv4.ip_forward=1" >> /etc/sysctl.conf
+sysctl -p
 echo "IP forwarding enabled"
 
 #------------------------------------------------------------------------------
 # Configure UFW if active (optional)
 #------------------------------------------------------------------------------
-if command -v ufw >/dev/null 2>&1 && sudo ufw status | grep -q "active"; then
+if command -v ufw >/dev/null 2>&1 && ufw status | grep -q "active"; then
     echo "Configuring UFW for WireGuard..."
-    sudo ufw allow 51820/udp
+    ufw allow 51820/udp
     echo "UFW configured for port 51820/udp"
 fi
 
@@ -244,7 +178,7 @@ fi
 # Ensure WireGuard kernel module is loaded
 #------------------------------------------------------------------------------
 echo "Loading WireGuard kernel module..."
-sudo modprobe wireguard 2>/dev/null || true
+modprobe wireguard 2>/dev/null || true
 
 #------------------------------------------------------------------------------
 # Start WireGuard service
@@ -252,18 +186,15 @@ sudo modprobe wireguard 2>/dev/null || true
 if [ -f "$WG_CONF" ]; then
     echo "Starting WireGuard service..."
     
-    # Stop if running and reset failed state
-    sudo systemctl stop wg-quick@wg0 2>/dev/null || true
-    sudo systemctl reset-failed wg-quick@wg0 2>/dev/null || true
-    
+    systemctl stop wg-quick@wg0 2>/dev/null || true
+    systemctl reset-failed wg-quick@wg0 2>/dev/null || true
 
-
-    sudo systemctl enable wg-quick@wg0
-    if sudo systemctl start wg-quick@wg0; then
+    systemctl enable wg-quick@wg0
+    if systemctl start wg-quick@wg0; then
         echo "WireGuard service started successfully"
     else
         echo "WARNING: Failed to start WireGuard service, checking logs..."
-        sudo journalctl -u wg-quick@wg0 -n 10 --no-pager
+        journalctl -u wg-quick@wg0 -n 10 --no-pager
         exit 1
     fi
 else
@@ -276,48 +207,32 @@ fi
 #------------------------------------------------------------------------------
 echo "=== Setup Complete ==="
 echo "WireGuard Status:"
-sudo systemctl status wg-quick@wg0 --no-pager --lines=5 || echo "Service status check failed"
+systemctl status wg-quick@wg0 --no-pager --lines=5 || echo "Service status check failed"
 
 echo "Active Peers:"
-sudo wg show 2>/dev/null || echo "No active WireGuard interface or command failed"
+wg show 2>/dev/null || echo "No active WireGuard interface or command failed"
 
 echo "Server Public Key:"
-sudo cat /etc/wireguard/publickey 2>/dev/null || echo "Public key not available"
+cat /etc/wireguard/publickey 2>/dev/null || echo "Public key not available"
 
 #------------------------------------------------------------------------------
 # Verify critical services and interface readiness
 #------------------------------------------------------------------------------
 echo "=== Verification ==="
-if sudo systemctl is-active --quiet wg-quick@wg0; then
-    echo "✅ WireGuard service is running"
-else
-    echo "❌ WireGuard service is not running"
-fi
-
-if [ -f "$WG_CONF" ]; then
-    echo "✅ WireGuard config exists"
-else
-    echo "❌ WireGuard config missing"
-fi
+systemctl is-active --quiet wg-quick@wg0 && echo "✅ WireGuard service is running" || echo "❌ WireGuard service is not running"
+[ -f "$WG_CONF" ] && echo "✅ WireGuard config exists" || echo "❌ WireGuard config missing"
 
 # Wait and verify wg0 interface
 echo "Verifying wg0 interface readiness..."
 for i in {1..5}; do
-    if ip link show wg0 >/dev/null 2>&1 && sudo wg show wg0 >/dev/null 2>&1; then
+    if ip link show wg0 >/dev/null 2>&1 && wg show wg0 >/dev/null 2>&1; then
         echo "✅ wg0 interface is up and ready"
         WG_IP=$(ip -4 addr show wg0 | grep -oP '(?<=inet\s)\d+(\.\d+){3}/\d+' | head -1)
-        if [ -n "$WG_IP" ]; then
-            echo "✅ wg0 interface IP: $WG_IP"
-        fi
+        [ -n "$WG_IP" ] && echo "✅ wg0 interface IP: $WG_IP"
         break
     fi
     echo "Waiting for wg0 interface to be ready... ($i/5)"
     sleep 5
-    if [ $i -eq 5 ]; then
-        echo "⚠️ wg0 interface did not become ready in time"
-        echo "Checking systemd logs..."
-        sudo journalctl -u wg-quick@wg0 -n 20 --no-pager
-    fi
 done
 
-echo " WireGuard setup completed successfully!"
+echo "WireGuard setup completed successfully!"
