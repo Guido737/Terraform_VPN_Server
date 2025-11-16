@@ -49,12 +49,15 @@ jobs:
       - name: Upload and run setup-wireguard.sh
         env:
           SERVER_IP: ${{ github.event.inputs.server_ip }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_REGION: us-east-1
         run: |
           echo "Uploading setup-wireguard.sh..."
           scp -i ~/.ssh/vpn_key -o StrictHostKeyChecking=no ./scripts/setup-wireguard.sh ubuntu@$SERVER_IP:/tmp/setup-wireguard.sh
 
           echo "Running setup-wireguard.sh on server..."
-          ssh -i ~/.ssh/vpn_key -o StrictHostKeyChecking=no ubuntu@$SERVER_IP "sudo -E DEBIAN_FRONTEND=noninteractive bash /tmp/setup-wireguard.sh"
+          ssh -i ~/.ssh/vpn_key -o StrictHostKeyChecking=no ubuntu@$SERVER_IP "sudo -E AWS_ACCESS_KEY_ID='$AWS_ACCESS_KEY_ID' AWS_SECRET_ACCESS_KEY='$AWS_SECRET_ACCESS_KEY' AWS_REGION='$AWS_REGION' DEBIAN_FRONTEND=noninteractive bash /tmp/setup-wireguard.sh"
 
       - name: Telegram notification
         uses: appleboy/telegram-action@master
