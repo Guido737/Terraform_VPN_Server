@@ -36,7 +36,7 @@ for i in {1..3}; do
 
     if DEBIAN_FRONTEND=noninteractive apt-get update -y && \
        DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-           wireguard wireguard-tools qrencode awscli iptables-persistent \
+           wireguard wireguard-tools qrencode iptables-persistent \
            -o Dpkg::Options::="--force-confdef" \
            -o Dpkg::Options::="--force-confold"; then
         echo "Packages installed successfully"
@@ -67,60 +67,65 @@ else
 fi
 
 #------------------------------------------------------------------------------
-# Configure AWS CLI
+# Configure AWS CLI (optional - only if credentials are provided)
 #------------------------------------------------------------------------------
-echo "Configuring AWS CLI..."
-mkdir -p ~/.aws
-cat > ~/.aws/config << EOL
+if [ -n "$AWS_ACCESS_KEY_ID" ] && [ -n "$AWS_SECRET_ACCESS_KEY" ]; then
+    echo "Configuring AWS CLI..."
+    mkdir -p ~/.aws
+    
+    # Install awscli if not already installed
+    if ! command -v aws &> /dev/null; then
+        echo "Installing AWS CLI..."
+        DEBIAN_FRONTEND=noninteractive apt-get install -y awscli
+    fi
+    
+    cat > ~/.aws/config << EOL
 [default]
-region = us-east-1
+region = ${AWS_REGION:-us-east-1}
 output = json
 EOL
 
-if [ -z "$AWS_ACCESS_KEY_ID" ] || [ -z "$AWS_SECRET_ACCESS_KEY" ]; then
-    echo "ERROR: AWS credentials not provided in environment variables"
-    exit 1
-fi
-
-cat > ~/.aws/credentials << EOL
+    cat > ~/.aws/credentials << EOL
 [default]
 aws_access_key_id = ${AWS_ACCESS_KEY_ID}
 aws_secret_access_key = ${AWS_SECRET_ACCESS_KEY}
 EOL
 
-chmod 600 ~/.aws/credentials
+    chmod 600 ~/.aws/credentials
 
-# Test AWS CLI configuration
-if aws sts get-caller-identity > /dev/null 2>&1; then
-    echo "✅ AWS CLI authentication successful"
-else
-    echo "❌ AWS CLI authentication failed"
-    exit 1
-fi
+    # Test AWS CLI configuration
+    if aws sts get-caller-identity > /dev/null 2>&1; then
+        echo "✅ AWS CLI authentication successful"
+        
+        #------------------------------------------------------------------------------
+        # Create VPN scripts directory
+        #------------------------------------------------------------------------------
+        mkdir -p /home/ubuntu/vpn-scripts
+        chown ubuntu:ubuntu /home/ubuntu/vpn-scripts
+        echo "Created VPN scripts directory"
 
-#------------------------------------------------------------------------------
-# Create VPN scripts directory
-#------------------------------------------------------------------------------
-mkdir -p /home/ubuntu/vpn-scripts
-chown ubuntu:ubuntu /home/ubuntu/vpn-scripts
-echo "Created VPN scripts directory"
+        #------------------------------------------------------------------------------
+        # Download setup scripts from S3 with retry
+        #------------------------------------------------------------------------------
+        echo "Downloading scripts from S3..."
+        for i in {1..3}; do
+            if aws s3 cp s3://my-vpn-configs-usernamezero-2025/scripts/ /home/ubuntu/vpn-scripts/ --recursive --exclude "*" --include "*.sh"; then
+                echo "Scripts downloaded successfully"
+                break
+            fi
+            echo "Retrying S3 download ($i/3)..."
+            sleep 5
+        done
 
-#------------------------------------------------------------------------------
-# Download setup scripts from S3 with retry
-#------------------------------------------------------------------------------
-echo "Downloading scripts from S3..."
-for i in {1..3}; do
-    if aws s3 cp s3://my-vpn-configs-usernamezero-2025/scripts/ /home/ubuntu/vpn-scripts/ --recursive --exclude "*" --include "*.sh"; then
-        echo "Scripts downloaded successfully"
-        break
+        if ls /home/ubuntu/vpn-scripts/*.sh >/dev/null 2>&1; then
+            chmod +x /home/ubuntu/vpn-scripts/*.sh
+            echo "Scripts made executable"
+        fi
+    else
+        echo "❌ AWS CLI authentication failed, skipping S3 operations"
     fi
-    echo "Retrying S3 download ($i/3)..."
-    sleep 5
-done
-
-if ls /home/ubuntu/vpn-scripts/*.sh >/dev/null 2>&1; then
-    chmod +x /home/ubuntu/vpn-scripts/*.sh
-    echo "Scripts made executable"
+else
+    echo "AWS credentials not provided, skipping AWS CLI configuration and S3 operations"
 fi
 
 #------------------------------------------------------------------------------
@@ -132,7 +137,7 @@ if [ -f "/home/ubuntu/vpn-scripts/wg-sync-configs.sh" ]; then
     echo "Running initial configuration sync..."
     /home/ubuntu/vpn-scripts/wg-sync-configs.sh
 elif [ ! -f "$WG_CONF" ]; then
-    echo "wg-sync-configs.sh not found, auto-generating basic wg0.conf..."
+    echo "Auto-generating basic wg0.conf..."
     PRIVATE_KEY=$(cat privatekey 2>/dev/null || echo "")
     if [ -z "$PRIVATE_KEY" ]; then
         echo "ERROR: Cannot read private key for auto-config"
