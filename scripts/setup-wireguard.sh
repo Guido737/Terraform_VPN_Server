@@ -29,6 +29,11 @@ export DEBCONF_NONINTERACTIVE_SEEN=true
 echo "iptables-persistent iptables-persistent/autosave_v4 boolean true" | sudo debconf-set-selections
 echo "iptables-persistent iptables-persistent/autosave_v6 boolean true" | sudo debconf-set-selections
 
+# Create empty rules files to avoid prompts during install
+sudo mkdir -p /etc/iptables
+sudo touch /etc/iptables/rules.v4
+sudo touch /etc/iptables/rules.v6
+
 #------------------------------------------------------------------------------
 # Install required packages with retry
 #------------------------------------------------------------------------------
