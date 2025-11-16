@@ -23,22 +23,23 @@ echo "Starting WireGuard setup..."
 # Non-interactive apt + preseed iptables-persistent answers
 #------------------------------------------------------------------------------
 export DEBIAN_FRONTEND=noninteractive
-export DEBCONF_NONINTERACTIVE_SEEN=true
-
-# Prevent iptables-persistent dialog from blocking CI
+#------------------------------------------------------------------------------
+# Preseed iptables-persistent to avoid prompts
+#------------------------------------------------------------------------------
 echo "iptables-persistent iptables-persistent/autosave_v4 boolean true" | sudo debconf-set-selections
 echo "iptables-persistent iptables-persistent/autosave_v6 boolean true" | sudo debconf-set-selections
 
-# Create empty rules files to avoid prompts during install
+#------------------------------------------------------------------------------
+# Ensure rules files exist to prevent prompts
+#------------------------------------------------------------------------------
 sudo mkdir -p /etc/iptables
-sudo touch /etc/iptables/rules.v4
-sudo touch /etc/iptables/rules.v6
+sudo iptables-save > /etc/iptables/rules.v4 || true
+sudo ip6tables-save > /etc/iptables/rules.v6 || true
 
 #------------------------------------------------------------------------------
 # Install required packages with retry
 #------------------------------------------------------------------------------
 echo "Updating packages and installing dependencies..."
-
 for i in {1..3}; do
     sudo rm -f /var/lib/dpkg/lock-frontend /var/cache/debconf/config.dat
     sudo dpkg --configure -a || true
@@ -48,7 +49,6 @@ for i in {1..3}; do
            wireguard wireguard-tools qrencode awscli iptables-persistent \
            -o Dpkg::Options::="--force-confdef" \
            -o Dpkg::Options::="--force-confold"; then
-
         echo "Packages installed successfully"
         break
     fi
