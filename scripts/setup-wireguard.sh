@@ -30,18 +30,31 @@ echo "iptables-persistent iptables-persistent/autosave_v4 boolean true" | sudo d
 echo "iptables-persistent iptables-persistent/autosave_v6 boolean true" | sudo debconf-set-selections
 
 #------------------------------------------------------------------------------
-# Ensure rules files exist to prevent prompts
+# Ensure no apt locks and fix dpkg
 #------------------------------------------------------------------------------
-sudo mkdir -p /etc/iptables
-sudo iptables-save > /etc/iptables/rules.v4 || true
-sudo ip6tables-save > /etc/iptables/rules.v6 || true
+sudo killall apt apt-get || true
+sudo rm -f /var/lib/dpkg/lock-frontend /var/lib/dpkg/lock /var/cache/debconf/config.dat
+sudo dpkg --configure -a || true
 
 #------------------------------------------------------------------------------
-# Install required packages with retry
+# Non-interactive apt + preseed iptables-persistent answers
 #------------------------------------------------------------------------------
-echo "Updating packages and installing dependencies..."
+export DEBIAN_FRONTEND=noninteractive
+echo "iptables-persistent iptables-persistent/autosave_v4 boolean true" | sudo debconf-set-selections
+echo "iptables-persistent iptables-persistent/autosave_v6 boolean true" | sudo debconf-set-selections
+
+# Save empty rules to prevent prompts
+sudo mkdir -p /etc/iptables
+sudo touch /etc/iptables/rules.v4 /etc/iptables/rules.v6
+sudo chmod 644 /etc/iptables/rules.v4 /etc/iptables/rules.v6
+
+#------------------------------------------------------------------------------
+# Install packages with retry
+#------------------------------------------------------------------------------
+
 for i in {1..3}; do
-    sudo rm -f /var/lib/dpkg/lock-frontend /var/cache/debconf/config.dat
+    sudo killall apt apt-get || true
+    sudo rm -f /var/lib/dpkg/lock-frontend /var/lib/dpkg/lock /var/cache/debconf/config.dat
     sudo dpkg --configure -a || true
 
     if sudo apt-get update -y && \
@@ -54,8 +67,8 @@ for i in {1..3}; do
     fi
 
     if [ $i -eq 3 ]; then
-        echo "ERROR: Failed to install packages after 3 attempts, skipping iptables-persistent"
-        sudo apt-get install -y --no-install-recommends iptables-persistent || echo "⚠️ iptables-persistent installation skipped"
+        echo "⚠️ Failed to install iptables-persistent after 3 attempts, skipping it"
+        sudo apt-get install -y --no-install-recommends iptables-persistent || echo "⚠️ Skipped"
         break
     fi
 
