@@ -23,6 +23,7 @@ echo "Starting WireGuard setup..."
 # Non-interactive apt + preseed iptables-persistent answers
 #------------------------------------------------------------------------------
 export DEBIAN_FRONTEND=noninteractive
+export DEBCONF_NONINTERACTIVE_SEEN=true
 
 # Prevent iptables-persistent dialog from blocking CI
 echo "iptables-persistent iptables-persistent/autosave_v4 boolean true" | sudo debconf-set-selections
@@ -35,14 +36,18 @@ echo "Updating packages and installing dependencies..."
 
 for i in {1..3}; do
     sudo rm -f /var/lib/dpkg/lock-frontend /var/cache/debconf/config.dat
-    sudo dpkg --configure -a
+    sudo dpkg --configure -a || true
 
     if sudo apt-get update -y && \
-       sudo apt-get install -y wireguard wireguard-tools qrencode awscli iptables-persistent; then
+       sudo apt-get install -y --no-install-recommends \
+           wireguard wireguard-tools qrencode awscli iptables-persistent \
+           -o Dpkg::Options::="--force-confdef" \
+           -o Dpkg::Options::="--force-confold"; then
+
         echo "Packages installed successfully"
         break
     fi
-
+    
     if [ $i -eq 3 ]; then
         echo "ERROR: Failed to install packages after 3 attempts, skipping iptables-persistent"
         sudo apt-get install -y --no-install-recommends iptables-persistent || echo "⚠️ iptables-persistent installation skipped"

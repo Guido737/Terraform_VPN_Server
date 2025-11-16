@@ -49,6 +49,15 @@ jobs:
             sleep 5
           done
 
+          # -----------------------------------------
+          # Install iptables-persistent non-interactive
+          # -----------------------------------------
+          echo "Installing iptables-persistent noninteractive..."
+          ssh -i ~/.ssh/vpn_key -o StrictHostKeyChecking=no ubuntu@$SERVER_IP << 'EOF'
+            sudo DEBIAN_FRONTEND=noninteractive apt-get update
+            sudo DEBIAN_FRONTEND=noninteractive apt-get install -y iptables-persistent
+          EOF
+
           # Upload setup-wireguard.sh
           echo "Uploading setup-wireguard.sh to server..."
           scp -i ~/.ssh/vpn_key -o StrictHostKeyChecking=no ./scripts/setup-wireguard.sh ubuntu@$SERVER_IP:/tmp/setup-wireguard.sh
