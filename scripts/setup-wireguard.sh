@@ -20,17 +20,25 @@ sudo dpkg --configure -a
 echo "Starting WireGuard setup..."
 
 #------------------------------------------------------------------------------
+# Non-interactive apt + preseed iptables-persistent answers
+#------------------------------------------------------------------------------
+export DEBIAN_FRONTEND=noninteractive
+
+# Prevent iptables-persistent dialog from blocking CI
+echo "iptables-persistent iptables-persistent/autosave_v4 boolean true" | sudo debconf-set-selections
+echo "iptables-persistent iptables-persistent/autosave_v6 boolean true" | sudo debconf-set-selections
+
+#------------------------------------------------------------------------------
 # Install required packages with retry
 #------------------------------------------------------------------------------
 echo "Updating packages and installing dependencies..."
-export DEBIAN_FRONTEND=noninteractive
 
 for i in {1..3}; do
     sudo rm -f /var/lib/dpkg/lock-frontend /var/cache/debconf/config.dat
     sudo dpkg --configure -a
 
     if sudo apt-get update -y && \
-       sudo apt-get install -y wireguard qrencode awscli iptables-persistent; then
+       sudo apt-get install -y wireguard wireguard-tools qrencode awscli iptables-persistent; then
         echo "Packages installed successfully"
         break
     fi
@@ -44,7 +52,6 @@ for i in {1..3}; do
     echo "Retrying package installation ($i/3)..."
     sleep 5
 done
-
 
 
 #------------------------------------------------------------------------------
