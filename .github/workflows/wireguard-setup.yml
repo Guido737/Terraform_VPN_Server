@@ -24,49 +24,37 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: us-east-1
 
-      - name: Upload and run setup-wireguard.sh
-        env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      - name: Prepare SSH key
         run: |
-          SERVER_IP="${{ github.event.inputs.server_ip }}"
-          if [ -z "$SERVER_IP" ]; then
-            echo "ERROR: server_ip not provided"
-            exit 1
-          fi
-
           mkdir -p ~/.ssh
-
-          # Download SSH key from S3
-          echo "Downloading SSH key from S3..."
+          echo "Downloading SSH key locally..."
           aws s3 cp s3://my-vpn-configs-usernamezero-2025/keys/vpn_private_key_production.pem ~/.ssh/vpn_key
           chmod 600 ~/.ssh/vpn_key
 
-          # Wait until SSH is ready
+      - name: Wait for server and upload key
+        env:
+          SERVER_IP: ${{ github.event.inputs.server_ip }}
+        run: |
           echo "Waiting for server to be ready..."
           until ssh -i ~/.ssh/vpn_key -o StrictHostKeyChecking=no ubuntu@$SERVER_IP "echo ready" >/dev/null 2>&1; do
             echo "Waiting for SSH..."
             sleep 5
           done
 
-          # -----------------------------------------
-          # Install iptables-persistent non-interactive
-          # -----------------------------------------
-          echo "Installing iptables-persistent noninteractive..."
-          ssh -i ~/.ssh/vpn_key -o StrictHostKeyChecking=no ubuntu@$SERVER_IP << 'EOF'
-            sudo DEBIAN_FRONTEND=noninteractive apt-get update
-            sudo DEBIAN_FRONTEND=noninteractive apt-get install -y iptables-persistent
-          EOF
+          echo "Uploading SSH key to server..."
+          ssh -i ~/.ssh/vpn_key -o StrictHostKeyChecking=no ubuntu@$SERVER_IP "mkdir -p ~/.ssh && chmod 700 ~/.ssh"
+          scp -i ~/.ssh/vpn_key -o StrictHostKeyChecking=no ~/.ssh/vpn_key ubuntu@$SERVER_IP:/home/ubuntu/.ssh/vpn_key
+          ssh -i ~/.ssh/vpn_key -o StrictHostKeyChecking=no ubuntu@$SERVER_IP "chmod 600 /home/ubuntu/.ssh/vpn_key && chown ubuntu:ubuntu /home/ubuntu/.ssh/vpn_key"
 
-          # Upload setup-wireguard.sh
-          echo "Uploading setup-wireguard.sh to server..."
+      - name: Upload and run setup-wireguard.sh
+        env:
+          SERVER_IP: ${{ github.event.inputs.server_ip }}
+        run: |
+          echo "Uploading setup-wireguard.sh..."
           scp -i ~/.ssh/vpn_key -o StrictHostKeyChecking=no ./scripts/setup-wireguard.sh ubuntu@$SERVER_IP:/tmp/setup-wireguard.sh
 
-          # Run the script with DEBIAN_FRONTEND=noninteractive
           echo "Running setup-wireguard.sh on server..."
-          ssh -i ~/.ssh/vpn_key -o StrictHostKeyChecking=no ubuntu@$SERVER_IP << 'EOF'
-            sudo DEBIAN_FRONTEND=noninteractive bash /tmp/setup-wireguard.sh
-          EOF
+          ssh -i ~/.ssh/vpn_key -o StrictHostKeyChecking=no ubuntu@$SERVER_IP "sudo DEBIAN_FRONTEND=noninteractive bash /tmp/setup-wireguard.sh"
 
       - name: Telegram notification
         uses: appleboy/telegram-action@master
@@ -77,7 +65,6 @@ jobs:
             ✅ WireGuard VPN Successfully Configured!
             🖥️ Server: ${{ github.event.inputs.server_ip }}
             📍 Region: us-east-1
-            🕐 Time: ${{ github.event.head_commit.timestamp }}
             🔧 Status: Ready for client connections
             📡 Port: 51820 UDP
             🌐 VPN Network: 10.0.0.0/24

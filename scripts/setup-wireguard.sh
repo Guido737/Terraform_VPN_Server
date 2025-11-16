@@ -47,7 +47,7 @@ for i in {1..3}; do
         echo "Packages installed successfully"
         break
     fi
-    
+
     if [ $i -eq 3 ]; then
         echo "ERROR: Failed to install packages after 3 attempts, skipping iptables-persistent"
         sudo apt-get install -y --no-install-recommends iptables-persistent || echo "⚠️ iptables-persistent installation skipped"
@@ -65,28 +65,28 @@ done
 sudo mkdir -p /etc/wireguard
 cd /etc/wireguard
 
-#------------------------------------------------------------------------------
-# Download private key from S3 if missing
-#------------------------------------------------------------------------------
-SSH_KEY="/home/ubuntu/.ssh/vpn_key"
+# #------------------------------------------------------------------------------
+# # Download private key from S3 if missing
+# #------------------------------------------------------------------------------
+# SSH_KEY="/home/ubuntu/.ssh/vpn_key"
 
-if [ ! -f "$SSH_KEY" ]; then
-    echo "Fetching VPN private key from S3..."
-    mkdir -p /home/ubuntu/.ssh
+# if [ ! -f "$SSH_KEY" ]; then
+#     echo "Fetching VPN private key from S3..."
+#     mkdir -p /home/ubuntu/.ssh
 
-    if aws s3 cp s3://my-vpn-configs-usernamezero-2025/keys/vpn_private_key_production.pem "$SSH_KEY"; then
-        echo "✅ Key downloaded: vpn_private_key_production.pem"
-    elif aws s3 cp "s3://my-vpn-configs-usernamezero-2025/keys/vpn_private_key.pem-production-19390587704" "$SSH_KEY"; then
-        echo "✅ Key downloaded: vpn_private_key.pem-production-19390587704"
-    else
-        echo "⚠️ No SSH key found in S3, exiting"
-        exit 1
-    fi
+#     if aws s3 cp s3://my-vpn-configs-usernamezero-2025/keys/vpn_private_key_production.pem "$SSH_KEY"; then
+#         echo "✅ Key downloaded: vpn_private_key_production.pem"
+#     elif aws s3 cp "s3://my-vpn-configs-usernamezero-2025/keys/vpn_private_key.pem-production-19390587704" "$SSH_KEY"; then
+#         echo "✅ Key downloaded: vpn_private_key.pem-production-19390587704"
+#     else
+#         echo "⚠️ No SSH key found in S3, exiting"
+#         exit 1
+#     fi
 
-    chown ubuntu:ubuntu "$SSH_KEY"
-    chmod 600 "$SSH_KEY"
-    echo "✅ VPN private key is ready"
-fi
+#     chown ubuntu:ubuntu "$SSH_KEY"
+#     chmod 600 "$SSH_KEY"
+#     echo "✅ VPN private key is ready"
+# fi
 
 #------------------------------------------------------------------------------
 # Generate server keys
