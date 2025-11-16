@@ -47,14 +47,14 @@ jobs:
           ssh -i ~/.ssh/vpn_key -o StrictHostKeyChecking=no ubuntu@$SERVER_IP "chmod 600 /home/ubuntu/.ssh/vpn_key && chown ubuntu:ubuntu /home/ubuntu/.ssh/vpn_key"
 
       - name: Upload and run setup-wireguard.sh
-  env:
-    SERVER_IP: ${{ github.event.inputs.server_ip }}
-  run: |
-    echo "Uploading setup-wireguard.sh..."
-    scp -i ~/.ssh/vpn_key -o StrictHostKeyChecking=no ./scripts/setup-wireguard.sh ubuntu@$SERVER_IP:/tmp/setup-wireguard.sh
+        env:
+          SERVER_IP: ${{ github.event.inputs.server_ip }}
+        run: |
+          echo "Uploading setup-wireguard.sh..."
+          scp -i ~/.ssh/vpn_key -o StrictHostKeyChecking=no ./scripts/setup-wireguard.sh ubuntu@$SERVER_IP:/tmp/setup-wireguard.sh
 
-    echo "Running setup-wireguard.sh on server..."
-    ssh -i ~/.ssh/vpn_key -o StrictHostKeyChecking=no ubuntu@$SERVER_IP "sudo -E DEBIAN_FRONTEND=noninteractive bash /tmp/setup-wireguard.sh"
+          echo "Running setup-wireguard.sh on server..."
+          ssh -i ~/.ssh/vpn_key -o StrictHostKeyChecking=no ubuntu@$SERVER_IP "sudo -E DEBIAN_FRONTEND=noninteractive bash /tmp/setup-wireguard.sh"
 
       - name: Telegram notification
         uses: appleboy/telegram-action@master
