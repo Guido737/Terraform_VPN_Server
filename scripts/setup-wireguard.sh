@@ -50,7 +50,7 @@ done
 #------------------------------------------------------------------------------
 # Create WireGuard directory and generate keys
 #------------------------------------------------------------------------------
- 
+
 cd ~
 mkdir -p /etc/wireguard
 cd /etc/wireguard
@@ -68,6 +68,49 @@ if [ ! -f privatekey ] || [ ! -f publickey ]; then
 else
     echo "Server keys already exist, skipping generation"
 fi
+
+#------------------------------------------------------------------------------
+# Create WireGuard configuration FIRST (before AWS operations)
+#------------------------------------------------------------------------------
+WG_CONF="/etc/wireguard/wg0.conf"
+
+# Always create or ensure config exists
+if [ ! -f "$WG_CONF" ]; then
+    echo "Creating WireGuard configuration..."
+    
+    # Read private key (we are still in /etc/wireguard)
+    if [ ! -f privatekey ]; then
+        echo "ERROR: Private key not found. Cannot create WireGuard config."
+        exit 1
+    fi
+    
+    PRIVATE_KEY=$(cat privatekey)
+    
+    # Determine default interface
+    DEFAULT_INTERFACE=$(ip route | grep default | awk '{print $5}' | head -1)
+    [ -z "$DEFAULT_INTERFACE" ] && DEFAULT_INTERFACE="eth0"
+    
+    # Create WireGuard config
+    cat > "$WG_CONF" << EOL
+[Interface]
+PrivateKey = $PRIVATE_KEY
+Address = 10.0.0.1/24
+ListenPort = 51820
+SaveConfig = true
+PostUp = iptables -A FORWARD -i wg0 -j ACCEPT; iptables -t nat -A POSTROUTING -o $DEFAULT_INTERFACE -j MASQUERADE
+PostDown = iptables -D FORWARD -i wg0 -j ACCEPT; iptables -t nat -D POSTROUTING -o $DEFAULT_INTERFACE -j MASQUERADE
+EOL
+    
+    chmod 600 "$WG_CONF"
+    echo "✅ WireGuard configuration created at $WG_CONF with interface: $DEFAULT_INTERFACE"
+else
+    echo "WireGuard config already exists at $WG_CONF"
+fi
+
+#------------------------------------------------------------------------------
+# Return to home directory for AWS operations
+#------------------------------------------------------------------------------
+cd ~
 
 #------------------------------------------------------------------------------
 # Configure AWS CLI (optional - only if credentials are provided)
@@ -131,49 +174,6 @@ EOL
 else
     echo "AWS credentials not provided, skipping AWS CLI configuration and S3 operations"
 fi
-
-#------------------------------------------------------------------------------
-# Create WireGuard configuration
-#------------------------------------------------------------------------------
-WG_CONF="/etc/wireguard/wg0.conf"
-
-# Always create or ensure config exists
-if [ ! -f "$WG_CONF" ]; then
-    echo "Creating WireGuard configuration..."
-    
-    # Read private key
-    if [ ! -f privatekey ]; then
-        echo "ERROR: Private key not found. Cannot create WireGuard config."
-        exit 1
-    fi
-    
-    PRIVATE_KEY=$(cat privatekey)
-    
-    # Determine default interface
-    DEFAULT_INTERFACE=$(ip route | grep default | awk '{print $5}' | head -1)
-    [ -z "$DEFAULT_INTERFACE" ] && DEFAULT_INTERFACE="eth0"
-    
-    # Create WireGuard config
-    cat > "$WG_CONF" << EOL
-[Interface]
-PrivateKey = $PRIVATE_KEY
-Address = 10.0.0.1/24
-ListenPort = 51820
-SaveConfig = true
-PostUp = iptables -A FORWARD -i wg0 -j ACCEPT; iptables -t nat -A POSTROUTING -o $DEFAULT_INTERFACE -j MASQUERADE
-PostDown = iptables -D FORWARD -i wg0 -j ACCEPT; iptables -t nat -D POSTROUTING -o $DEFAULT_INTERFACE -j MASQUERADE
-EOL
-    
-    chmod 600 "$WG_CONF"
-    echo "✅ WireGuard configuration created at $WG_CONF with interface: $DEFAULT_INTERFACE"
-else
-    echo "WireGuard config already exists at $WG_CONF"
-fi
-
-#------------------------------------------------------------------------------
-# Return to home directory for other operations
-#------------------------------------------------------------------------------
-cd /tmp
 
 #------------------------------------------------------------------------------
 # Run initial sync if scripts were downloaded
