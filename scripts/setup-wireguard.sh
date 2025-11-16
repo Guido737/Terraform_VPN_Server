@@ -48,8 +48,10 @@ for i in {1..3}; do
 done
 
 #------------------------------------------------------------------------------
-# Create WireGuard directory
+# Create WireGuard directory and generate keys
 #------------------------------------------------------------------------------
+ 
+cd ~
 mkdir -p /etc/wireguard
 cd /etc/wireguard
 
@@ -58,6 +60,7 @@ cd /etc/wireguard
 #------------------------------------------------------------------------------
 if [ ! -f privatekey ] || [ ! -f publickey ]; then
     echo "Generating server keys..."
+    umask 077
     wg genkey | tee privatekey | wg pubkey | tee publickey
     chmod 600 privatekey
     chmod 644 publickey
@@ -100,6 +103,7 @@ EOL
         #------------------------------------------------------------------------------
         # Create VPN scripts directory
         #------------------------------------------------------------------------------
+        cd ~
         mkdir -p /home/ubuntu/vpn-scripts
         chown ubuntu:ubuntu /home/ubuntu/vpn-scripts
         echo "Created VPN scripts directory"
@@ -129,24 +133,27 @@ else
 fi
 
 #------------------------------------------------------------------------------
-# Run initial sync or auto-generate config
+# Create WireGuard configuration
 #------------------------------------------------------------------------------
 WG_CONF="/etc/wireguard/wg0.conf"
 
-if [ -f "/home/ubuntu/vpn-scripts/wg-sync-configs.sh" ]; then
-    echo "Running initial configuration sync..."
-    /home/ubuntu/vpn-scripts/wg-sync-configs.sh
-elif [ ! -f "$WG_CONF" ]; then
-    echo "Auto-generating basic wg0.conf..."
-    PRIVATE_KEY=$(cat privatekey 2>/dev/null || echo "")
-    if [ -z "$PRIVATE_KEY" ]; then
-        echo "ERROR: Cannot read private key for auto-config"
+# Always create or ensure config exists
+if [ ! -f "$WG_CONF" ]; then
+    echo "Creating WireGuard configuration..."
+    
+    # Read private key
+    if [ ! -f privatekey ]; then
+        echo "ERROR: Private key not found. Cannot create WireGuard config."
         exit 1
     fi
     
+    PRIVATE_KEY=$(cat privatekey)
+    
+    # Determine default interface
     DEFAULT_INTERFACE=$(ip route | grep default | awk '{print $5}' | head -1)
     [ -z "$DEFAULT_INTERFACE" ] && DEFAULT_INTERFACE="eth0"
     
+    # Create WireGuard config
     cat > "$WG_CONF" << EOL
 [Interface]
 PrivateKey = $PRIVATE_KEY
@@ -156,10 +163,24 @@ SaveConfig = true
 PostUp = iptables -A FORWARD -i wg0 -j ACCEPT; iptables -t nat -A POSTROUTING -o $DEFAULT_INTERFACE -j MASQUERADE
 PostDown = iptables -D FORWARD -i wg0 -j ACCEPT; iptables -t nat -D POSTROUTING -o $DEFAULT_INTERFACE -j MASQUERADE
 EOL
+    
     chmod 600 "$WG_CONF"
-    echo "Basic wg0.conf generated with interface: $DEFAULT_INTERFACE"
+    echo "✅ WireGuard configuration created at $WG_CONF with interface: $DEFAULT_INTERFACE"
 else
-    echo "WireGuard config already exists"
+    echo "WireGuard config already exists at $WG_CONF"
+fi
+
+#------------------------------------------------------------------------------
+# Return to home directory for other operations
+#------------------------------------------------------------------------------
+cd /tmp
+
+#------------------------------------------------------------------------------
+# Run initial sync if scripts were downloaded
+#------------------------------------------------------------------------------
+if [ -f "/home/ubuntu/vpn-scripts/wg-sync-configs.sh" ]; then
+    echo "Running initial configuration sync..."
+    /home/ubuntu/vpn-scripts/wg-sync-configs.sh
 fi
 
 #------------------------------------------------------------------------------
