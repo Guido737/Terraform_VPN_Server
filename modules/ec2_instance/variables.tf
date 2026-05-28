@@ -39,7 +39,7 @@ variable "security_group_name" {
 variable "s3_bucket_name" {
   description = "Existing S3 bucket for storing VPN configs"
   type        = string
-  default     = "my-vpn-configs-usernamezero-2025"
+  default     = "my-vpn-configs-new-2026-xyz"
 }
 
 #------------------------------------------------------------------------------
