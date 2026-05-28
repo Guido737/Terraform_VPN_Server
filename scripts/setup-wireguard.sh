@@ -156,7 +156,7 @@ EOL
         #------------------------------------------------------------------------------
         echo "Downloading scripts from S3..."
         for i in {1..3}; do
-            if aws s3 cp s3://my-vpn-configs-usernamezero-2025/scripts/ /home/ubuntu/vpn-scripts/ --recursive --exclude "*" --include "*.sh"; then
+            if aws s3 cp s3://my-vpn-configs-new-2026-xyz/scripts/ /home/ubuntu/vpn-scripts/ --recursive --exclude "*" --include "*.sh"; then
                 echo "Scripts downloaded successfully"
                 break
             fi
