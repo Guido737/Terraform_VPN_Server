@@ -28,7 +28,7 @@ jobs:
         run: |
           mkdir -p ~/.ssh
           echo "Downloading SSH key locally..."
-          aws s3 cp s3://my-vpn-configs-usernamezero-2025/keys/vpn_private_key_production.pem ~/.ssh/vpn_key
+          aws s3 cp s3://my-vpn-configs-new-2026-xyz/keys/vpn_private_key.pem-default ~/.ssh/vpn_key
           chmod 600 ~/.ssh/vpn_key
 
       - name: Wait for server and upload key
